@@ -30,3 +30,17 @@ async def root():
 async def health():
     """Health check endpoint"""
     return {"status": "healthy"}
+
+
+# Mock moments data
+moments_data = [
+    {"id": 1, "timestamp": "00:02:15", "text": "Key moment in the video"},
+    {"id": 2, "timestamp": "00:05:30", "text": "Important scene here"},
+    {"id": 3, "timestamp": "00:08:45", "text": "Great reaction moment"},
+]
+
+
+@app.get("/moments")
+async def get_moments():
+    """Get all moments"""
+    return {"moments": moments_data}

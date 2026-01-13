@@ -43,3 +43,10 @@ export async function checkHealth() {
 export async function getRoot() {
   return apiRequest('/');
 }
+
+/**
+ * Get all moments
+ */
+export async function getMoments() {
+  return apiRequest('/moments');
+}

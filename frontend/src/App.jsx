@@ -1,10 +1,13 @@
 import { useState, useEffect } from 'react'
 import './App.css'
-import { checkHealth, getRoot } from './services/api'
+import { checkHealth, getRoot, getMoments } from './services/api'
 
 function App() {
   const [apiStatus, setApiStatus] = useState('checking...')
   const [apiMessage, setApiMessage] = useState('')
+  const [moments, setMoments] = useState([])
+  const [momentsLoading, setMomentsLoading] = useState(false)
+  const [momentsError, setMomentsError] = useState(null)
 
   useEffect(() => {
     // Check backend connection on mount
@@ -14,13 +17,37 @@ function App() {
         return getRoot()
       })
       .then((data) => {
-        setApiMessage(data.message || '')
+        setApiMessage(data?.message || '')
       })
       .catch((error) => {
         setApiStatus('disconnected')
         console.error('Failed to connect to backend:', error)
       })
   }, [])
+
+  useEffect(() => {
+    // Load moments when backend is connected
+    if (apiStatus === 'connected') {
+      setMomentsLoading(true)
+      setMomentsError(null)
+      getMoments()
+        .then((data) => {
+          // Guard against undefined/null moments
+          const momentsArray = Array.isArray(data?.moments) ? data.moments : []
+          setMoments(momentsArray)
+          setMomentsLoading(false)
+        })
+        .catch((error) => {
+          setMomentsError('Failed to load moments')
+          setMomentsLoading(false)
+          setMoments([]) // Ensure moments is always an array
+          console.error('Failed to load moments:', error)
+        })
+    }
+  }, [apiStatus])
+
+  // Always ensure moments is an array
+  const safeMoments = Array.isArray(moments) ? moments : []
 
   return (
     <div className="app">
@@ -40,10 +67,29 @@ function App() {
           {apiMessage && <p className="api-message">{apiMessage}</p>}
         </div>
         
-        <div className="info-card">
-          <h3>Welcome to ReMo</h3>
-          <p>This is the frontend application for ReMo.</p>
-          <p>Start building your media moments interface here.</p>
+        <div className="moments-card">
+          <h2>Moments</h2>
+          {momentsLoading && <p>Loading moments...</p>}
+          {momentsError && <p className="error">{momentsError}</p>}
+          {!momentsLoading && !momentsError && safeMoments.length === 0 && (
+            <p>No moments found</p>
+          )}
+          {!momentsLoading && !momentsError && safeMoments.length > 0 && (
+            <div className="moments-list">
+              {safeMoments.map((moment) => {
+                // Guard against undefined/null moment
+                if (!moment || typeof moment.id === 'undefined') {
+                  return null
+                }
+                return (
+                  <div key={moment.id} className="moment-item">
+                    <span className="moment-timestamp">{moment.timestamp || ''}</span>
+                    <span className="moment-text">{moment.text || ''}</span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       </main>
     </div>
