@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import './App.css'
 import { checkHealth, getRoot, getMoments, addMoment } from './services/api'
-import MomentsList from './components/MomentsList'
+import VideoPlayer from './components/VideoPlayer'
+import MomentsPanel from './components/MomentsPanel'
 
 function App() {
   const [apiStatus, setApiStatus] = useState('checking...')
@@ -12,6 +13,8 @@ function App() {
   const [formTimestamp, setFormTimestamp] = useState('')
   const [formText, setFormText] = useState('')
   const [formSubmitting, setFormSubmitting] = useState(false)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [duration, setDuration] = useState(0)
 
   useEffect(() => {
     // Check backend connection on mount
@@ -76,6 +79,14 @@ function App() {
     }
   }
 
+  const handleTimeUpdate = (time) => {
+    setCurrentTime(time)
+  }
+
+  const handleLoadedMetadata = (dur) => {
+    setDuration(dur)
+  }
+
   return (
     <div className="app">
       <header className="app-header">
@@ -125,11 +136,22 @@ function App() {
           </form>
         </div>
 
-        <MomentsList 
-          moments={moments}
-          loading={momentsLoading}
-          error={momentsError}
-        />
+        <div className="video-layout">
+          <div className="video-column">
+            <VideoPlayer
+              onTimeUpdate={handleTimeUpdate}
+              onLoadedMetadata={handleLoadedMetadata}
+            />
+          </div>
+          
+          <div className="panel-column">
+            {momentsLoading && <p>Loading moments...</p>}
+            {momentsError && <p className="error">{momentsError}</p>}
+            {!momentsLoading && !momentsError && (
+              <MomentsPanel moments={moments} currentTime={currentTime} />
+            )}
+          </div>
+        </div>
       </main>
     </div>
   )
