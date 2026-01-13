@@ -50,3 +50,13 @@ export async function getRoot() {
 export async function getMoments() {
   return apiRequest('/moments');
 }
+
+/**
+ * Create a new moment
+ */
+export async function addMoment(moment) {
+  return apiRequest('/moments', {
+    method: 'POST',
+    body: JSON.stringify(moment),
+  });
+}

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import './App.css'
-import { checkHealth, getRoot, getMoments } from './services/api'
+import { checkHealth, getRoot, getMoments, addMoment } from './services/api'
+import MomentsList from './components/MomentsList'
 
 function App() {
   const [apiStatus, setApiStatus] = useState('checking...')
@@ -8,6 +9,9 @@ function App() {
   const [moments, setMoments] = useState([])
   const [momentsLoading, setMomentsLoading] = useState(false)
   const [momentsError, setMomentsError] = useState(null)
+  const [formTimestamp, setFormTimestamp] = useState('')
+  const [formText, setFormText] = useState('')
+  const [formSubmitting, setFormSubmitting] = useState(false)
 
   useEffect(() => {
     // Check backend connection on mount
@@ -46,8 +50,31 @@ function App() {
     }
   }, [apiStatus])
 
-  // Always ensure moments is an array
-  const safeMoments = Array.isArray(moments) ? moments : []
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    if (!formTimestamp.trim() || !formText.trim()) {
+      return
+    }
+
+    setFormSubmitting(true)
+    try {
+      await addMoment({
+        timestamp: formTimestamp.trim(),
+        text: formText.trim()
+      })
+      // Reset form
+      setFormTimestamp('')
+      setFormText('')
+      // Re-fetch moments
+      const data = await getMoments()
+      const momentsArray = Array.isArray(data?.moments) ? data.moments : []
+      setMoments(momentsArray)
+    } catch (error) {
+      console.error('Failed to add moment:', error)
+    } finally {
+      setFormSubmitting(false)
+    }
+  }
 
   return (
     <div className="app">
@@ -67,30 +94,42 @@ function App() {
           {apiMessage && <p className="api-message">{apiMessage}</p>}
         </div>
         
-        <div className="moments-card">
-          <h2>Moments</h2>
-          {momentsLoading && <p>Loading moments...</p>}
-          {momentsError && <p className="error">{momentsError}</p>}
-          {!momentsLoading && !momentsError && safeMoments.length === 0 && (
-            <p>No moments found</p>
-          )}
-          {!momentsLoading && !momentsError && safeMoments.length > 0 && (
-            <div className="moments-list">
-              {safeMoments.map((moment) => {
-                // Guard against undefined/null moment
-                if (!moment || typeof moment.id === 'undefined') {
-                  return null
-                }
-                return (
-                  <div key={moment.id} className="moment-item">
-                    <span className="moment-timestamp">{moment.timestamp || ''}</span>
-                    <span className="moment-text">{moment.text || ''}</span>
-                  </div>
-                )
-              })}
+        <div className="add-moment-card">
+          <h2>Add Moment</h2>
+          <form onSubmit={handleSubmit}>
+            <div className="form-group">
+              <label htmlFor="timestamp">Timestamp</label>
+              <input
+                id="timestamp"
+                type="text"
+                value={formTimestamp}
+                onChange={(e) => setFormTimestamp(e.target.value)}
+                placeholder="00:02:15"
+                disabled={formSubmitting}
+              />
             </div>
-          )}
+            <div className="form-group">
+              <label htmlFor="text">Text</label>
+              <input
+                id="text"
+                type="text"
+                value={formText}
+                onChange={(e) => setFormText(e.target.value)}
+                placeholder="Enter moment description"
+                disabled={formSubmitting}
+              />
+            </div>
+            <button type="submit" disabled={formSubmitting || !formTimestamp.trim() || !formText.trim()}>
+              {formSubmitting ? 'Adding...' : 'Add Moment'}
+            </button>
+          </form>
         </div>
+
+        <MomentsList 
+          moments={moments}
+          loading={momentsLoading}
+          error={momentsError}
+        />
       </main>
     </div>
   )

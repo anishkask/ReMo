@@ -1,7 +1,7 @@
 """
 ReMo Backend - FastAPI Application Entry Point
 """
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(
@@ -32,7 +32,7 @@ async def health():
     return {"status": "healthy"}
 
 
-# Mock moments data
+# In-memory storage for moments
 moments_data = [
     {"id": 1, "timestamp": "00:02:15", "text": "Key moment in the video"},
     {"id": 2, "timestamp": "00:05:30", "text": "Important scene here"},
@@ -44,3 +44,23 @@ moments_data = [
 async def get_moments():
     """Get all moments"""
     return {"moments": moments_data}
+
+
+@app.post("/moments")
+async def create_moment(request: Request):
+    """Create a new moment"""
+    body = await request.json()
+    timestamp = body.get("timestamp", "")
+    text = body.get("text", "")
+    
+    # Auto-increment id
+    next_id = max([m["id"] for m in moments_data], default=0) + 1
+    
+    new_moment = {
+        "id": next_id,
+        "timestamp": timestamp,
+        "text": text
+    }
+    
+    moments_data.append(new_moment)
+    return {"moment": new_moment}
