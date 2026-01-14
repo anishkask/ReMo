@@ -3,9 +3,11 @@ import './App.css'
 import { checkHealth, getRoot, getMoments, addMoment } from './services/api'
 import VideoPlayer from './components/VideoPlayer'
 import MomentsPanel from './components/MomentsPanel'
-import { formatCommentTime } from './utils/time'
+import DisplayNamePrompt from './components/DisplayNamePrompt'
+import { formatCommentTime, parseTimestampToSeconds } from './utils/time'
 
 // Available videos for demo
+// You can change these to any video URLs or local files
 const VIDEOS = [
   {
     id: '1',
@@ -22,6 +24,12 @@ const VIDEOS = [
     title: 'For Bigger Blazes',
     src: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4'
   }
+  // Add more videos here:
+  // {
+  //   id: '4',
+  //   title: 'Your Video Title',
+  //   src: 'https://your-video-url.com/video.mp4'
+  // }
 ]
 
 function App() {
@@ -35,8 +43,29 @@ function App() {
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
   const [selectedMoment, setSelectedMoment] = useState(null)
+  const [followLive, setFollowLive] = useState(true)
   const [commentsByVideoId, setCommentsByVideoId] = useState({})
+  const [displayName, setDisplayName] = useState('')
+  const [showNamePrompt, setShowNamePrompt] = useState(false)
   const videoPlayerRef = useRef(null)
+
+  // Load display name from localStorage on mount
+  useEffect(() => {
+    const savedName = localStorage.getItem('remoDisplayName')
+    if (savedName) {
+      setDisplayName(savedName)
+    } else {
+      // Prompt for name on first visit
+      setShowNamePrompt(true)
+    }
+  }, [])
+
+  // Save display name to localStorage when it changes
+  const handleSetDisplayName = (name) => {
+    setDisplayName(name)
+    localStorage.setItem('remoDisplayName', name)
+    setShowNamePrompt(false)
+  }
 
   // Get current video
   const currentVideo = selectedVideoId ? VIDEOS.find(v => v.id === selectedVideoId) : null
@@ -46,6 +75,45 @@ function App() {
   
   // Get comments for current video
   const commentsByMomentId = selectedVideoId ? (commentsByVideoId[selectedVideoId] || {}) : {}
+
+  // Convert timestamp to seconds helper
+  const timestampToSeconds = (timestamp) => {
+    if (!timestamp || typeof timestamp !== 'string') return 0
+    const parts = timestamp.split(':').map(Number)
+    if (parts.length === 2) {
+      return parts[0] * 60 + parts[1]
+    } else if (parts.length === 3) {
+      return parts[0] * 3600 + parts[1] * 60 + parts[2]
+    }
+    return 0
+  }
+
+  // Compute active moment based on currentTime (for live-follow mode)
+  const computeActiveMoment = () => {
+    if (!moments || moments.length === 0) return null
+    
+    const currentSeconds = currentTime
+    const momentsWithSeconds = moments
+      .filter(m => m && m.timestamp)
+      .map(m => ({
+        ...m,
+        seconds: timestampToSeconds(m.timestamp)
+      }))
+      .filter(m => m.seconds <= currentSeconds + 1) // Within 1 second window
+      .sort((a, b) => b.seconds - a.seconds) // Latest first
+    
+    return momentsWithSeconds.length > 0 ? momentsWithSeconds[0] : null
+  }
+
+  // Determine which moment to show in panel
+  const displayedMoment = followLive ? computeActiveMoment() : selectedMoment
+
+  // Clear selectedMoment when switching to live-follow mode
+  useEffect(() => {
+    if (followLive) {
+      setSelectedMoment(null)
+    }
+  }, [followLive])
 
   // Initialize seeded comments for each moment (per video)
   const initializeSeededComments = (momentsArray, videoId) => {
@@ -144,21 +212,16 @@ function App() {
   const handleTimestampClick = (moment) => {
     if (moment) {
       // Convert timestamp to seconds
-      const parts = moment.timestamp.split(':').map(Number)
-      let seconds = 0
-      if (parts.length === 2) {
-        seconds = parts[0] * 60 + parts[1]
-      } else if (parts.length === 3) {
-        seconds = parts[0] * 3600 + parts[1] * 60 + parts[2]
-      }
+      const seconds = parseTimestampToSeconds(moment.timestamp)
       
       // Seek video to timestamp
       if (videoPlayerRef.current) {
         videoPlayerRef.current.seekTo(seconds)
       }
       
-      // Set selected moment
+      // Set selected moment and disable live-follow
       setSelectedMoment(moment)
+      setFollowLive(false)
     } else {
       // Clear selection
       setSelectedMoment(null)
@@ -169,7 +232,31 @@ function App() {
     handleMarkerClick(seconds)
   }
 
+  const handleSeek = (seconds) => {
+    // Seek video to this time
+    if (videoPlayerRef.current) {
+      videoPlayerRef.current.seekTo(seconds)
+    }
+  }
+
+  const handleSelectMoment = (moment) => {
+    // Set selected moment and disable live-follow
+    setSelectedMoment(moment)
+    setFollowLive(false)
+  }
+
+  const handleFollowLive = () => {
+    setFollowLive(true)
+    setSelectedMoment(null)
+  }
+
+  const handleDisableFollowLive = () => {
+    setFollowLive(false)
+  }
+
   const handleMarkerClick = (seconds) => {
+    handleSeek(seconds)
+    
     // Convert seconds to timestamp string (MM:SS or HH:MM:SS)
     const hours = Math.floor(seconds / 3600)
     const minutes = Math.floor((seconds % 3600) / 60)
@@ -182,21 +269,14 @@ function App() {
       timestamp = `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
     }
 
-    // Seek video to this time
-    if (videoPlayerRef.current) {
-      videoPlayerRef.current.seekTo(seconds)
-    }
-
     // Find moment at this timestamp, or create a placeholder
     const moment = moments.find(m => m.timestamp === timestamp)
     
     if (moment) {
-      // If moment exists, select it
-      setSelectedMoment(moment)
+      handleSelectMoment(moment)
     } else {
       // If no moment exists, create a temporary one for viewing
-      // This allows users to click anywhere and see/add comments
-      setSelectedMoment({
+      handleSelectMoment({
         id: `temp-${timestamp}`,
         timestamp: timestamp,
         text: `Moment at ${timestamp}`
@@ -205,12 +285,12 @@ function App() {
   }
 
   const handleAddComment = (momentId, commentText) => {
-    if (!commentText.trim() || !momentId || !selectedVideoId) return
+    if (!commentText.trim() || !momentId || !selectedVideoId || !displayName) return
 
     const newComment = {
       id: `user-${selectedVideoId}-${Date.now()}`,
       text: commentText.trim(),
-      author: 'You',
+      author: displayName,
       createdAt: new Date().toISOString()
     }
 
@@ -240,6 +320,7 @@ function App() {
     setSelectedVideoId(videoId)
     setShowMenu(false)
     setSelectedMoment(null)
+    setFollowLive(true)
     setCurrentTime(0)
   }
 
@@ -247,14 +328,32 @@ function App() {
     setShowMenu(true)
     setSelectedVideoId(null)
     setSelectedMoment(null)
+    setFollowLive(true)
     setCurrentTime(0)
   }
 
   return (
-    <div className="app">
+    <div className={`app ${showMenu ? 'menu-mode' : ''}`}>
       <header className="app-header">
-        <h1>ReMo</h1>
-        <p className="subtitle">Real-time Media Moments</p>
+        <div className="header-content">
+          <div>
+            <h1>ReMo</h1>
+            <p className="subtitle">Real-time Media Moments</p>
+          </div>
+          {displayName && (
+            <div className="display-name-indicator">
+              <span className="name-label">Guest:</span>
+              <span className="name-value">{displayName}</span>
+              <button 
+                className="change-name-button"
+                onClick={() => setShowNamePrompt(true)}
+                title="Change display name"
+              >
+                ✎
+              </button>
+            </div>
+          )}
+        </div>
       </header>
       
       <main className="app-main">
@@ -269,8 +368,8 @@ function App() {
         </div>
 
         {showMenu ? (
-          <div className="video-menu">
-            <h2>Select a Video</h2>
+          <div className="menu-full-width">
+            <h2 className="menu-title">Select a Video</h2>
             <div className="video-grid">
               {VIDEOS.map(video => (
                 <div 
@@ -279,7 +378,15 @@ function App() {
                   onClick={() => handleVideoSelect(video.id)}
                 >
                   <div className="video-card-thumbnail">
-                    <div className="play-icon">▶</div>
+                    <video
+                      src={video.src}
+                      preload="metadata"
+                      className="thumbnail-video"
+                      muted
+                    />
+                    <div className="play-overlay">
+                      <div className="play-icon">▶</div>
+                    </div>
                   </div>
                   <h3 className="video-card-title">{video.title}</h3>
                   <button className="video-card-button">Watch</button>
@@ -302,68 +409,11 @@ function App() {
                 onTimeUpdate={handleTimeUpdate}
                 onLoadedMetadata={handleLoadedMetadata}
                 onVideoClick={handleVideoClick}
-                onMarkerClick={handleMarkerClick}
+                moments={moments}
+                commentsByMomentId={commentsByMomentId}
+                onSeek={handleSeek}
+                onSelectMoment={handleSelectMoment}
               />
-              
-              {selectedMoment && (
-                <div className="moment-details-panel">
-                  <div className="moment-details-header">
-                    <h3>Moment: {selectedMoment.timestamp}</h3>
-                    <button 
-                      className="close-moment-button"
-                      onClick={() => setSelectedMoment(null)}
-                    >
-                      ×
-                    </button>
-                  </div>
-                  <div className="moment-details-content">
-                    <p className="moment-description">{selectedMoment.text}</p>
-                    <div className="comments-section">
-                      <h4>Comments</h4>
-                      {(() => {
-                        const comments = commentsByMomentId[selectedMoment.id] || []
-                        return comments.length === 0 ? (
-                          <p className="empty-state">No comments yet</p>
-                        ) : (
-                          <div className="comments-list">
-                            {comments.map((comment) => (
-                              <div key={comment.id} className="comment-item">
-                                <div className="comment-header">
-                                  <span className="comment-author">{comment.author}</span>
-                                  {comment.createdAt && (
-                                    <span className="comment-time">{formatCommentTime(comment.createdAt)}</span>
-                                  )}
-                                </div>
-                                <span className="comment-text">{comment.text}</span>
-                              </div>
-                            ))}
-                          </div>
-                        )
-                      })()}
-                      <form 
-                        className="add-comment-section" 
-                        onSubmit={(e) => {
-                          e.preventDefault()
-                          const input = e.target.querySelector('.comment-input')
-                          if (input && input.value.trim()) {
-                            handleAddComment(selectedMoment.id, input.value)
-                            input.value = ''
-                          }
-                        }}
-                      >
-                        <input
-                          type="text"
-                          placeholder="Add a comment..."
-                          className="comment-input"
-                        />
-                        <button type="submit" className="comment-submit">
-                          Post
-                        </button>
-                      </form>
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
             
             <div className="panel-column">
@@ -373,16 +423,35 @@ function App() {
                 <MomentsPanel 
                   moments={moments} 
                   currentTime={currentTime}
-                  selectedMoment={selectedMoment}
+                  displayedMoment={displayedMoment}
+                  followLive={followLive}
+                  onFollowLive={handleFollowLive}
+                  onDisableFollowLive={handleDisableFollowLive}
                   onTimestampClick={handleTimestampClick}
                   commentsByMomentId={commentsByMomentId}
                   onAddComment={handleAddComment}
+                  onSeek={handleSeek}
+                  displayName={displayName}
+                  onRequestName={() => setShowNamePrompt(true)}
                 />
               )}
             </div>
           </div>
         )}
       </main>
+
+      {showNamePrompt && (
+        <DisplayNamePrompt
+          currentName={displayName}
+          onSetName={handleSetDisplayName}
+          onClose={() => {
+            // Only allow closing if name is already set
+            if (displayName && displayName.trim()) {
+              setShowNamePrompt(false)
+            }
+          }}
+        />
+      )}
     </div>
   )
 }
