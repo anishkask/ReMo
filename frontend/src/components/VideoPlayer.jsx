@@ -1,7 +1,15 @@
 import { useRef, useEffect, useImperativeHandle, forwardRef, useState } from 'react'
-import VideoProgressBar from './VideoProgressBar'
 
-const VideoPlayer = forwardRef(function VideoPlayer({ src, onTimeUpdate, onLoadedMetadata, onVideoClick, onMarkerClick }, ref) {
+const VideoPlayer = forwardRef(function VideoPlayer({ 
+  src, 
+  onTimeUpdate, 
+  onLoadedMetadata, 
+  onVideoClick, 
+  moments,
+  commentsByMomentId,
+  onSeek,
+  onSelectMoment
+}, ref) {
   const videoRef = useRef(null)
   const [duration, setDuration] = useState(0)
 
@@ -88,12 +96,6 @@ const VideoPlayer = forwardRef(function VideoPlayer({ src, onTimeUpdate, onLoade
           Your browser does not support the video tag.
         </video>
       </div>
-      <VideoProgressBar
-        videoRef={videoRef}
-        duration={duration}
-        currentTime={0}
-        onMarkerClick={onMarkerClick}
-      />
     </div>
   )
 })
