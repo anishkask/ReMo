@@ -2,9 +2,16 @@ import { useState, useEffect, useRef } from 'react'
 import './App.css'
 import { checkHealth, getRoot, getMoments, addMoment } from './services/api'
 import VideoPlayer from './components/VideoPlayer'
-import MomentsPanel from './components/MomentsPanel'
+import TimelineStrip from './components/TimelineStrip'
+import LiveReactionsFeed from './components/LiveCommentsFeed'
+import AddCommentBar from './components/AddCommentBar'
 import DisplayNamePrompt from './components/DisplayNamePrompt'
-import { formatCommentTime, parseTimestampToSeconds } from './utils/time'
+import ImportVideoModal from './components/ImportVideoModal'
+import { formatCommentTime, parseTimestampToSeconds, formatSecondsToTimestamp } from './utils/time'
+import { loadVideos, removeVideo, getLocalVideoFile, updateVideo } from './utils/storage'
+import { loadCustomVideos, removeCustomVideo } from './utils/customVideos'
+import { loadCommentsForVideo, saveComment, groupCommentsByMoment } from './utils/comments'
+import VideoImportCard from './components/VideoImportCard'
 
 // Available videos for demo
 // You can change these to any video URLs or local files
@@ -47,6 +54,11 @@ function App() {
   const [commentsByVideoId, setCommentsByVideoId] = useState({})
   const [displayName, setDisplayName] = useState('')
   const [showNamePrompt, setShowNamePrompt] = useState(false)
+  const [importedVideos, setImportedVideos] = useState([])
+  const [localVideoUrls, setLocalVideoUrls] = useState({}) // Map of videoId -> objectURL
+  const [showImportModal, setShowImportModal] = useState(false)
+  const [reconnectingVideoId, setReconnectingVideoId] = useState(null)
+  const [customVideos, setCustomVideos] = useState([])
   const videoPlayerRef = useRef(null)
 
   // Load display name from localStorage on mount
@@ -60,6 +72,47 @@ function App() {
     }
   }, [])
 
+  // Load imported videos and hydrate local video URLs
+  useEffect(() => {
+    const loadImportedVideos = async () => {
+      const videos = loadVideos()
+      setImportedVideos(videos)
+
+      // Hydrate local video URLs from IndexedDB
+      const urlMap = {}
+      for (const video of videos) {
+        if (video.sourceType === 'local' && video.localKey) {
+          try {
+            const file = await getLocalVideoFile(video.localKey)
+            if (file) {
+              urlMap[video.id] = URL.createObjectURL(file)
+            }
+          } catch (error) {
+            console.warn(`Failed to load local video ${video.id}:`, error)
+          }
+        }
+      }
+      setLocalVideoUrls(urlMap)
+    }
+
+    loadImportedVideos()
+  }, [])
+
+  // Load custom videos (URL imports) on mount
+  useEffect(() => {
+    const videos = loadCustomVideos()
+    setCustomVideos(videos)
+  }, [])
+
+  // Cleanup object URLs on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(localVideoUrls).forEach(url => {
+        if (url) URL.revokeObjectURL(url)
+      })
+    }
+  }, [localVideoUrls])
+
   // Save display name to localStorage when it changes
   const handleSetDisplayName = (name) => {
     setDisplayName(name)
@@ -67,8 +120,26 @@ function App() {
     setShowNamePrompt(false)
   }
 
+  // Merge sample videos with imported videos and custom videos
+  const allVideos = [
+    ...VIDEOS.map(v => ({ ...v, sourceType: 'sample', src: v.src })),
+    ...importedVideos.map(v => ({
+      ...v,
+      src: v.sourceType === 'local' 
+        ? localVideoUrls[v.id] || null
+        : v.url || null
+    })),
+    ...customVideos.map(v => ({
+      ...v,
+      src: v.url,
+      sourceType: 'custom'
+    }))
+  ]
+
   // Get current video
-  const currentVideo = selectedVideoId ? VIDEOS.find(v => v.id === selectedVideoId) : null
+  const currentVideo = selectedVideoId 
+    ? allVideos.find(v => v.id === selectedVideoId) 
+    : null
   
   // Get moments for current video
   const moments = selectedVideoId ? (momentsByVideoId[selectedVideoId] || []) : []
@@ -183,9 +254,63 @@ function App() {
           const momentsForAllVideos = {}
           const commentsForAllVideos = {}
           
-          VIDEOS.forEach(video => {
-            momentsForAllVideos[video.id] = momentsArray
-            commentsForAllVideos[video.id] = initializeSeededComments(momentsArray, video.id)
+          // Initialize moments for all videos (sample + imported + custom)
+          const allVideoIds = [
+            ...VIDEOS.map(v => v.id),
+            ...importedVideos.map(v => v.id),
+            ...customVideos.map(v => v.id)
+          ]
+          
+          allVideoIds.forEach(videoId => {
+            // Start with backend moments
+            const videoMoments = [...momentsArray]
+            
+            // Load persisted comments from localStorage
+            const storedComments = loadCommentsForVideo(videoId)
+            
+            // Find unique timestamps from stored comments that don't have moments
+            const timestampsNeedingMoments = new Set()
+            storedComments.forEach(storedComment => {
+              const existingMoment = momentsArray.find(m => m.timestamp === storedComment.timestampLabel)
+              if (!existingMoment) {
+                timestampsNeedingMoments.add(storedComment.timestampLabel)
+              }
+            })
+            
+            // Create moments for timestamps that need them
+            timestampsNeedingMoments.forEach(timestampLabel => {
+              const newMoment = {
+                id: `moment-${videoId}-${timestampLabel.replace(/:/g, '-')}`,
+                timestamp: timestampLabel,
+                text: `Moment at ${timestampLabel}`
+              }
+              videoMoments.push(newMoment)
+            })
+            
+            momentsForAllVideos[videoId] = videoMoments
+            
+            // Load seeded comments
+            const seededComments = initializeSeededComments(videoMoments, videoId)
+            
+            // Group stored comments by moment (using all moments including newly created ones)
+            const storedCommentsGrouped = groupCommentsByMoment(storedComments, videoMoments)
+            
+            // Merge seeded and stored comments
+            const mergedComments = { ...seededComments }
+            
+            // Add stored comments, merging with seeded if moment exists
+            Object.keys(storedCommentsGrouped).forEach(momentId => {
+              if (mergedComments[momentId]) {
+                // Merge arrays, avoiding duplicates by id
+                const existingIds = new Set(mergedComments[momentId].map(c => c.id))
+                const newComments = storedCommentsGrouped[momentId].filter(c => !existingIds.has(c.id))
+                mergedComments[momentId] = [...mergedComments[momentId], ...newComments]
+              } else {
+                mergedComments[momentId] = storedCommentsGrouped[momentId]
+              }
+            })
+            
+            commentsForAllVideos[videoId] = mergedComments
           })
           
           setMomentsByVideoId(momentsForAllVideos)
@@ -199,7 +324,7 @@ function App() {
           console.error('Failed to load moments:', error)
         })
     }
-  }, [apiStatus])
+  }, [apiStatus, importedVideos, customVideos])
 
   const handleTimeUpdate = (time) => {
     setCurrentTime(time)
@@ -284,23 +409,60 @@ function App() {
     }
   }
 
-  const handleAddComment = (momentId, commentText) => {
-    if (!commentText.trim() || !momentId || !selectedVideoId || !displayName) return
+  const handleAddComment = (momentId, commentText, timestampSeconds) => {
+    if (!commentText.trim() || !selectedVideoId || !displayName) return
 
-    const newComment = {
-      id: `user-${selectedVideoId}-${Date.now()}`,
-      text: commentText.trim(),
-      author: displayName,
-      createdAt: new Date().toISOString()
+    // Format timestamp
+    const timestamp = formatSecondsToTimestamp(timestampSeconds)
+    
+    // Find or create moment for this timestamp
+    let targetMoment = moments.find(m => m.timestamp === timestamp)
+    
+    if (!targetMoment) {
+      // Create a new moment for this timestamp
+      targetMoment = {
+        id: `moment-${selectedVideoId}-${timestamp.replace(/:/g, '-')}`,
+        timestamp: timestamp,
+        text: `Moment at ${timestamp}`
+      }
+      
+      // Add to moments
+      setMomentsByVideoId(prev => ({
+        ...prev,
+        [selectedVideoId]: [...(prev[selectedVideoId] || []), targetMoment]
+      }))
     }
 
+    // Generate unique ID
+    const commentId = crypto.randomUUID ? crypto.randomUUID() : `comment-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+    const createdAtISO = new Date().toISOString()
+
+    const newComment = {
+      id: commentId,
+      text: commentText.trim(),
+      author: displayName,
+      createdAt: createdAtISO
+    }
+
+    // Update React state immediately (optimistic update)
     setCommentsByVideoId(prev => ({
       ...prev,
       [selectedVideoId]: {
         ...(prev[selectedVideoId] || {}),
-        [momentId]: [...((prev[selectedVideoId] || {})[momentId] || []), newComment]
+        [targetMoment.id]: [...((prev[selectedVideoId] || {})[targetMoment.id] || []), newComment]
       }
     }))
+
+    // Persist to localStorage
+    const commentToStore = {
+      id: commentId,
+      timestampSeconds: timestampSeconds,
+      timestampLabel: timestamp,
+      text: commentText.trim(),
+      displayName: displayName,
+      createdAtISO: createdAtISO
+    }
+    saveComment(selectedVideoId, commentToStore)
   }
 
   const handleVideoChange = (e) => {
@@ -332,14 +494,121 @@ function App() {
     setCurrentTime(0)
   }
 
+  const handleVideoAdded = async (newVideo) => {
+    // Reload imported videos
+    const videos = loadVideos()
+    setImportedVideos(videos)
+
+    // If local video, create object URL
+    if (newVideo.sourceType === 'local' && newVideo.file) {
+      const objectURL = URL.createObjectURL(newVideo.file)
+      setLocalVideoUrls(prev => ({
+        ...prev,
+        [newVideo.id]: objectURL
+      }))
+    }
+  }
+
+  const handleRemoveVideo = async (videoId, e) => {
+    e.stopPropagation() // Prevent video selection
+    
+    if (!window.confirm('Are you sure you want to remove this video?')) {
+      return
+    }
+
+    try {
+      // Check if it's a custom video
+      const isCustom = customVideos.some(v => v.id === videoId)
+      
+      if (isCustom) {
+        // Remove custom video
+        removeCustomVideo(videoId)
+        setCustomVideos(prev => prev.filter(v => v.id !== videoId))
+      } else {
+        // Remove imported video (local/remote)
+        await removeVideo(videoId)
+        setImportedVideos(prev => prev.filter(v => v.id !== videoId))
+        
+        // Revoke object URL if local
+        if (localVideoUrls[videoId]) {
+          URL.revokeObjectURL(localVideoUrls[videoId])
+          setLocalVideoUrls(prev => {
+            const updated = { ...prev }
+            delete updated[videoId]
+            return updated
+          })
+        }
+      }
+
+      // If this video was selected, go back to menu
+      if (selectedVideoId === videoId) {
+        handleBackToMenu()
+      }
+    } catch (error) {
+      console.error('Error removing video:', error)
+      alert('Failed to remove video')
+    }
+  }
+
+  const handleCustomVideoAdded = (video) => {
+    // Reload custom videos
+    const videos = loadCustomVideos()
+    setCustomVideos(videos)
+  }
+
+  const handleReconnectLocalFile = async (videoId, e) => {
+    e.stopPropagation() // Prevent video selection
+    
+    setReconnectingVideoId(videoId)
+    
+    // Create file input
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = 'video/mp4,video/webm,video/quicktime'
+    
+    input.onchange = async (e) => {
+      const file = e.target.files[0]
+      if (!file) {
+        setReconnectingVideoId(null)
+        return
+      }
+
+      try {
+        // Update video with new file
+        await updateVideo(videoId, { file })
+        
+        // Create new object URL
+        const objectURL = URL.revokeObjectURL(localVideoUrls[videoId])
+        const newObjectURL = URL.createObjectURL(file)
+        
+        setLocalVideoUrls(prev => ({
+          ...prev,
+          [videoId]: newObjectURL
+        }))
+
+        // Reload imported videos
+        const videos = loadVideos()
+        setImportedVideos(videos)
+        
+        setReconnectingVideoId(null)
+      } catch (error) {
+        console.error('Error reconnecting file:', error)
+        alert('Failed to reconnect file')
+        setReconnectingVideoId(null)
+      }
+    }
+    
+    input.click()
+  }
+
   return (
     <div className={`app ${showMenu ? 'menu-mode' : ''}`}>
       <header className="app-header">
         <div className="header-content">
-          <div>
+      <div onClick={handleBackToMenu} style={{ cursor: 'pointer' }}>
             <h1>ReMo</h1>
             <p className="subtitle">Real-time Media Moments</p>
-          </div>
+      </div>
           {displayName && (
             <div className="display-name-indicator">
               <span className="name-label">Guest:</span>
@@ -350,7 +619,7 @@ function App() {
                 title="Change display name"
               >
                 ✎
-              </button>
+        </button>
             </div>
           )}
         </div>
@@ -371,70 +640,149 @@ function App() {
           <div className="menu-full-width">
             <h2 className="menu-title">Select a Video</h2>
             <div className="video-grid">
-              {VIDEOS.map(video => (
-                <div 
-                  key={video.id} 
-                  className="video-card"
-                  onClick={() => handleVideoSelect(video.id)}
-                >
-                  <div className="video-card-thumbnail">
-                    <video
-                      src={video.src}
-                      preload="metadata"
-                      className="thumbnail-video"
-                      muted
-                    />
-                    <div className="play-overlay">
-                      <div className="play-icon">▶</div>
+              {/* Video cards */}
+              {allVideos.map(video => {
+                const isLocal = video.sourceType === 'local'
+                const isRemote = video.sourceType === 'remote'
+                const isCustom = video.sourceType === 'custom'
+                const isImported = isLocal || isRemote || isCustom
+                const hasFile = isLocal && localVideoUrls[video.id]
+                const missingFile = isLocal && !localVideoUrls[video.id]
+
+                return (
+                  <div 
+                    key={video.id} 
+                    className={`video-card ${missingFile ? 'video-card-missing' : ''}`}
+                    onClick={() => {
+                      if (!missingFile) {
+                        handleVideoSelect(video.id)
+                      }
+                    }}
+                  >
+                    <div className="video-card-thumbnail">
+                      {missingFile ? (
+                        <div className="video-card-placeholder">
+                          <div className="placeholder-icon">⚠</div>
+                          <p>File Missing</p>
+                        </div>
+                      ) : video.thumbnail ? (
+                        <img
+                          src={video.thumbnail}
+                          alt={video.title}
+                          className="thumbnail-image"
+                        />
+                      ) : (
+                        <video
+                          src={video.src}
+                          preload="metadata"
+                          className="thumbnail-video"
+                          muted
+                        />
+                      )}
+                      {!missingFile && (
+                        <div className="play-overlay">
+                          <div className="play-icon">▶</div>
+                        </div>
+                      )}
+                    </div>
+                    <div className="video-card-badges">
+                      {isImported && (
+                        <span className={`video-badge ${isLocal ? 'badge-local' : isCustom ? 'badge-custom' : 'badge-remote'}`}>
+                          {isLocal ? 'Local' : isCustom ? 'Custom' : 'URL'}
+                        </span>
+                      )}
+                    </div>
+                    <h3 className="video-card-title">{video.title}</h3>
+                    <div className="video-card-actions">
+                      {missingFile ? (
+                        <button 
+                          className="video-card-reconnect"
+                          onClick={(e) => handleReconnectLocalFile(video.id, e)}
+                          disabled={reconnectingVideoId === video.id}
+                        >
+                          {reconnectingVideoId === video.id ? 'Reconnecting...' : 'Reconnect'}
+                        </button>
+                      ) : (
+                        <button 
+                          className="video-card-button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleVideoSelect(video.id)
+                          }}
+                        >
+                          Watch
+                        </button>
+                      )}
+                      {isImported && (
+                        <button
+                          className="video-card-remove"
+                          onClick={(e) => handleRemoveVideo(video.id, e)}
+                          title="Remove video"
+                        >
+                          ×
+                        </button>
+                      )}
                     </div>
                   </div>
-                  <h3 className="video-card-title">{video.title}</h3>
-                  <button className="video-card-button">Watch</button>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div className="video-layout">
-            <div className="video-column">
-              <div className="video-header">
-                <button className="back-to-menu-button" onClick={handleBackToMenu}>
-                  ← Back to Menu
-                </button>
-                <h2 className="video-title-header">{currentVideo?.title}</h2>
-              </div>
-              <VideoPlayer
-                ref={videoPlayerRef}
-                src={currentVideo?.src}
-                onTimeUpdate={handleTimeUpdate}
-                onLoadedMetadata={handleLoadedMetadata}
-                onVideoClick={handleVideoClick}
-                moments={moments}
-                commentsByMomentId={commentsByMomentId}
-                onSeek={handleSeek}
-                onSelectMoment={handleSelectMoment}
-              />
+                )
+              })}
             </div>
             
-            <div className="panel-column">
-              {momentsLoading && <p>Loading moments...</p>}
-              {momentsError && <p className="error">{momentsError}</p>}
-              {!momentsLoading && !momentsError && (
-                <MomentsPanel 
-                  moments={moments} 
-                  currentTime={currentTime}
-                  displayedMoment={displayedMoment}
-                  followLive={followLive}
-                  onFollowLive={handleFollowLive}
-                  onDisableFollowLive={handleDisableFollowLive}
-                  onTimestampClick={handleTimestampClick}
+            {/* Inline import row */}
+            <VideoImportCard onVideoAdded={handleCustomVideoAdded} />
+          </div>
+        ) : (
+          <div className="watch-page-container">
+            <div className="watch-page-header">
+              <h2 className="watch-page-title">{currentVideo?.title}</h2>
+            </div>
+            
+            <div className="watch-page-content">
+              {/* Video */}
+              <div className="watch-video-section">
+                <VideoPlayer
+                  ref={videoPlayerRef}
+                  src={currentVideo?.src}
+                  onTimeUpdate={handleTimeUpdate}
+                  onLoadedMetadata={handleLoadedMetadata}
+                  onVideoClick={handleVideoClick}
+                  moments={moments}
                   commentsByMomentId={commentsByMomentId}
-                  onAddComment={handleAddComment}
                   onSeek={handleSeek}
+                  onSelectMoment={handleSelectMoment}
+                />
+              </div>
+              
+              {/* Timeline Strip */}
+              <div className="watch-timeline-section">
+                <TimelineStrip
+                  duration={duration}
+                  currentTime={currentTime}
+                  moments={moments}
+                  commentsByMomentId={commentsByMomentId}
+                  onSeek={handleSeek}
+                  onMarkerClick={handleSelectMoment}
+                />
+              </div>
+              
+              {/* Live Reactions Feed */}
+              <div className="watch-feed-section">
+                <LiveReactionsFeed
+                  moments={moments}
+                  commentsByMomentId={commentsByMomentId}
+                  currentTime={currentTime}
+                />
+              </div>
+              
+              {/* Add Comment Bar */}
+              <div className="watch-comment-bar-section">
+                <AddCommentBar
+                  currentTime={currentTime}
                   displayName={displayName}
+                  onAddComment={handleAddComment}
                   onRequestName={() => setShowNamePrompt(true)}
                 />
-              )}
+              </div>
             </div>
           </div>
         )}
@@ -452,7 +800,14 @@ function App() {
           }}
         />
       )}
-    </div>
+
+      {showImportModal && (
+        <ImportVideoModal
+          onClose={() => setShowImportModal(false)}
+          onVideoAdded={handleVideoAdded}
+        />
+      )}
+      </div>
   )
 }
 
