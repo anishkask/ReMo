@@ -118,10 +118,54 @@ npm run dev  # Runs on port 5173
 
 ---
 
+---
+
+## Live Demo
+
+ReMo is currently deployed as **Demo v1** and is actively being iterated upon.
+
+**Note**: This is an evolving demo. Features and UI may change as development continues.
+
+### Demo Links
+- Frontend: [Coming soon - will be added after deployment]
+- Backend API: [Coming soon - will be added after deployment]
+
+---
+
+## Deployment
+
+### Environment Variables
+
+**Frontend** (set in Vercel/Netlify):
+- `VITE_API_BASE_URL`: Your deployed backend URL (e.g., `https://remo-backend.onrender.com`)
+
+**Backend** (set in Render/Railway):
+- `ALLOWED_ORIGINS`: Comma-separated list of allowed frontend URLs (e.g., `https://remo-demo.vercel.app,http://localhost:5173`)
+
+### Quick Deployment Guide
+
+1. **Deploy Backend** (Render or Railway):
+   - Connect your repository
+   - Set build command: (none needed)
+   - Set start command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+   - Add environment variable: `ALLOWED_ORIGINS` with your frontend URL(s)
+   - Deploy
+
+2. **Deploy Frontend** (Vercel or Netlify):
+   - Connect your repository
+   - Set root directory: `frontend`
+   - Set build command: `npm run build`
+   - Set output directory: `dist`
+   - Add environment variable: `VITE_API_BASE_URL` with your backend URL
+   - Deploy
+
+See `DEPLOYMENT.md` for detailed step-by-step instructions.
+
+---
+
 ## Next Steps
 - [x] Set up backend FastAPI structure (single-file approach)
 - [x] Set up frontend React structure
 - [x] Configure CORS for frontend-backend communication
-- [ ] Implement first real API endpoint
-- [ ] Implement second real API endpoint (then consider refactoring if needed)
-- [ ] Create initial UI components
+- [x] Deploy Demo v1
+- [ ] Continue iterating on features and UI
