@@ -38,9 +38,17 @@ function DisplayNamePrompt({ currentName, onSetName, onClose }) {
   return (
     <div 
       className="display-name-prompt-overlay" 
-      onClick={canClose ? onClose : undefined}
+      onClick={onClose}
     >
       <div className="display-name-prompt-card" onClick={(e) => e.stopPropagation()}>
+        <button 
+          className="display-name-prompt-close"
+          onClick={onClose}
+          title="Close"
+          aria-label="Close"
+        >
+          ×
+        </button>
         <h3>Set Your Display Name</h3>
         <p className="prompt-description">
           Choose a name to appear on your comments. This is saved locally and won't be shared.

@@ -49,3 +49,6 @@ Thumbs.db
 # Build outputs
 *.egg
 *.whl
+
+# Test/debug files
+frontend/public/gis-min.html

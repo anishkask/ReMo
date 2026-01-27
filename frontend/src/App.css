@@ -76,6 +76,62 @@
   min-width: 200px;
 }
 
+.header-auth-section {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.auth-buttons {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.auth-button {
+  padding: 0.6rem 1.2rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+  white-space: nowrap;
+}
+
+.google-sign-in-button {
+  background: #4285F4;
+  color: white;
+}
+
+.google-sign-in-button:hover {
+  background: #357AE8;
+  box-shadow: 0 2px 8px rgba(66, 133, 244, 0.3);
+}
+
+.guest-button {
+  background: rgba(255, 255, 255, 0.2);
+  color: rgba(255, 251, 240, 0.9);
+  border: 1px solid rgba(255, 251, 240, 0.3);
+}
+
+.guest-button:hover {
+  background: rgba(255, 255, 255, 0.3);
+  color: #FFFBF0;
+}
+
+.app.menu-mode .guest-button {
+  background: rgba(255, 251, 240, 0.15);
+  color: rgba(255, 251, 240, 0.9);
+  border-color: rgba(255, 251, 240, 0.4);
+}
+
+.app.menu-mode .guest-button:hover {
+  background: rgba(255, 251, 240, 0.25);
+  color: #FFFBF0;
+}
+
 @media (max-width: 768px) {
   .header-content {
     flex-direction: column;
@@ -84,6 +140,15 @@
   .display-name-indicator {
     font-size: 0.85rem;
     padding: 0.4rem 0.75rem;
+  }
+  
+  .auth-buttons {
+    flex-direction: column;
+    width: 100%;
+  }
+  
+  .auth-button {
+    width: 100%;
   }
 }
 
@@ -125,6 +190,67 @@
   color: #0288D1;
 }
 
+/* Google Auth Button Styles */
+.google-auth-button-container {
+  display: inline-block;
+}
+
+.google-auth-signed-in {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.google-user-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.google-user-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid rgba(79, 195, 247, 0.3);
+}
+
+.google-user-name {
+  color: rgba(255, 251, 240, 0.9);
+  font-weight: 500;
+  font-size: 0.9rem;
+}
+
+.app.menu-mode .google-user-name {
+  color: rgba(255, 251, 240, 0.9);
+}
+
+.google-sign-out-button {
+  padding: 0.5rem 1rem;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 251, 240, 0.9);
+  border: 1px solid rgba(255, 251, 240, 0.3);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.google-sign-out-button:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: #FFFBF0;
+}
+
+.app.menu-mode .google-sign-out-button {
+  background: rgba(255, 251, 240, 0.15);
+  color: rgba(255, 251, 240, 0.9);
+  border-color: rgba(255, 251, 240, 0.4);
+}
+
+.app.menu-mode .google-sign-out-button:hover {
+  background: rgba(255, 251, 240, 0.25);
+  color: #FFFBF0;
+}
+
 .display-name-prompt-overlay {
   position: fixed;
   top: 0;
@@ -147,6 +273,33 @@
   border: 2px solid rgba(79, 195, 247, 0.3);
   max-width: 400px;
   width: 90%;
+  position: relative;
+}
+
+.display-name-prompt-close {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  color: #546E7A;
+  cursor: pointer;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: all 0.2s;
+  line-height: 1;
+  padding: 0;
+}
+
+.display-name-prompt-close:hover {
+  background: rgba(79, 195, 247, 0.1);
+  color: #0277BD;
+}
   animation: slideIn 0.3s ease-out;
 }
 

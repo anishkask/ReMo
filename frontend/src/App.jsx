@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef } from 'react'
 import './App.css'
-import { checkHealth, getRoot, getMoments, addMoment } from './services/api'
+import { checkHealth, getRoot, getMoments, addMoment, authGoogle } from './services/api'
 import VideoPlayer from './components/VideoPlayer'
 import TimelineStrip from './components/TimelineStrip'
 import LiveReactionsFeed from './components/LiveCommentsFeed'
 import AddCommentBar from './components/AddCommentBar'
 import DisplayNamePrompt from './components/DisplayNamePrompt'
 import ImportVideoModal from './components/ImportVideoModal'
+import GoogleAuthButton from './components/GoogleAuthButton'
 import { formatCommentTime, parseTimestampToSeconds, formatSecondsToTimestamp } from './utils/time'
 import { loadVideos, removeVideo, getLocalVideoFile, updateVideo } from './utils/storage'
 import { loadCustomVideos, removeCustomVideo } from './utils/customVideos'
@@ -54,6 +55,7 @@ function App() {
   const [commentsByVideoId, setCommentsByVideoId] = useState({})
   const [displayName, setDisplayName] = useState('')
   const [showNamePrompt, setShowNamePrompt] = useState(false)
+  const [authUser, setAuthUser] = useState(null) // Google auth user
   const [importedVideos, setImportedVideos] = useState([])
   const [localVideoUrls, setLocalVideoUrls] = useState({}) // Map of videoId -> objectURL
   const [showImportModal, setShowImportModal] = useState(false)
@@ -61,14 +63,25 @@ function App() {
   const [customVideos, setCustomVideos] = useState([])
   const videoPlayerRef = useRef(null)
 
-  // Load display name from localStorage on mount
+  // Load display name and auth state from localStorage on mount
   useEffect(() => {
     const savedName = localStorage.getItem('remoDisplayName')
     if (savedName) {
       setDisplayName(savedName)
-    } else {
-      // Prompt for name on first visit
-      setShowNamePrompt(true)
+    }
+    
+    // Check for saved auth user
+    const savedAuthUser = localStorage.getItem('remo_auth_user')
+    if (savedAuthUser) {
+      try {
+        setAuthUser(JSON.parse(savedAuthUser))
+        const user = JSON.parse(savedAuthUser)
+        if (user.name) {
+          setDisplayName(user.name)
+        }
+      } catch (error) {
+        console.error('Failed to load auth user:', error)
+      }
     }
   }, [])
 
@@ -112,6 +125,51 @@ function App() {
       })
     }
   }, [localVideoUrls])
+
+  // Handle "Continue as guest" - show display name prompt
+  const handleContinueAsGuest = () => {
+    const savedName = localStorage.getItem('remoDisplayName')
+    if (savedName) {
+      setDisplayName(savedName)
+    } else {
+      setShowNamePrompt(true)
+    }
+  }
+
+  // Handle Google Sign-In
+  const handleGoogleSignIn = async (idToken) => {
+    try {
+      const response = await authGoogle(idToken)
+      
+      // Store access token and user
+      localStorage.setItem('remo_access_token', response.access_token)
+      localStorage.setItem('remo_auth_user', JSON.stringify(response.user))
+      
+      // Update state
+      setAuthUser(response.user)
+      setDisplayName(response.user.name || response.user.email)
+      
+      return true
+    } catch (error) {
+      console.error('Google sign in failed:', error)
+      throw error
+    }
+  }
+
+  // Handle Google Sign-Out
+  const handleGoogleSignOut = () => {
+    localStorage.removeItem('remo_access_token')
+    localStorage.removeItem('remo_auth_user')
+    setAuthUser(null)
+    
+    // Fall back to guest mode if display name exists
+    const savedName = localStorage.getItem('remoDisplayName')
+    if (savedName) {
+      setDisplayName(savedName)
+    } else {
+      setDisplayName('')
+    }
+  }
 
   // Save display name to localStorage when it changes
   const handleSetDisplayName = (name) => {
@@ -410,7 +468,14 @@ function App() {
   }
 
   const handleAddComment = (momentId, commentText, timestampSeconds) => {
-    if (!commentText.trim() || !selectedVideoId || !displayName) return
+    if (!commentText.trim() || !selectedVideoId) return
+    
+    // Use auth user name if signed in, otherwise require displayName
+    const authorName = authUser 
+      ? (authUser.name || authUser.email || 'User')
+      : displayName
+    
+    if (!authorName) return
 
     // Format timestamp
     const timestamp = formatSecondsToTimestamp(timestampSeconds)
@@ -440,7 +505,7 @@ function App() {
     const newComment = {
       id: commentId,
       text: commentText.trim(),
-      author: displayName,
+      author: authorName,
       createdAt: createdAtISO
     }
 
@@ -605,23 +670,46 @@ function App() {
     <div className={`app ${showMenu ? 'menu-mode' : ''}`}>
       <header className="app-header">
         <div className="header-content">
-      <div onClick={handleBackToMenu} style={{ cursor: 'pointer' }}>
+          <div onClick={handleBackToMenu} style={{ cursor: 'pointer' }}>
             <h1>ReMo</h1>
             <p className="subtitle">Real-time Media Moments</p>
-      </div>
-          {displayName && (
-            <div className="display-name-indicator">
-              <span className="name-label">Guest:</span>
-              <span className="name-value">{displayName}</span>
-              <button 
-                className="change-name-button"
-                onClick={() => setShowNamePrompt(true)}
-                title="Change display name"
-              >
-                ✎
-        </button>
-            </div>
-          )}
+          </div>
+          <div className="header-auth-section">
+            {authUser ? (
+              <GoogleAuthButton
+                onSignIn={handleGoogleSignIn}
+                onSignOut={handleGoogleSignOut}
+                isSignedIn={true}
+                user={authUser}
+              />
+            ) : displayName ? (
+              <div className="display-name-indicator">
+                <span className="name-label">Guest:</span>
+                <span className="name-value">{displayName}</span>
+                <button 
+                  className="change-name-button"
+                  onClick={() => setShowNamePrompt(true)}
+                  title="Change display name"
+                >
+                  ✎
+                </button>
+              </div>
+            ) : (
+              <div className="auth-buttons">
+                <GoogleAuthButton
+                  onSignIn={handleGoogleSignIn}
+                  onSignOut={handleGoogleSignOut}
+                  isSignedIn={false}
+                />
+                <button 
+                  className="auth-button guest-button"
+                  onClick={handleContinueAsGuest}
+                >
+                  Continue as Guest
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </header>
       
@@ -778,9 +866,13 @@ function App() {
               <div className="watch-comment-bar-section">
                 <AddCommentBar
                   currentTime={currentTime}
-                  displayName={displayName}
+                  displayName={authUser ? (authUser.name || authUser.email || 'User') : displayName}
                   onAddComment={handleAddComment}
-                  onRequestName={() => setShowNamePrompt(true)}
+                  onRequestName={() => {
+                    if (!authUser) {
+                      handleContinueAsGuest()
+                    }
+                  }}
                 />
               </div>
             </div>
@@ -793,10 +885,8 @@ function App() {
           currentName={displayName}
           onSetName={handleSetDisplayName}
           onClose={() => {
-            // Only allow closing if name is already set
-            if (displayName && displayName.trim()) {
-              setShowNamePrompt(false)
-            }
+            // Allow closing - user can set name later or sign in with Google
+            setShowNamePrompt(false)
           }}
         />
       )}

@@ -1,8 +1,12 @@
 """
 ReMo Backend - FastAPI Application Entry Point
 """
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from google.auth.transport import requests
+from google.oauth2 import id_token
+import os
 
 app = FastAPI(
     title="ReMo API",
@@ -12,8 +16,7 @@ app = FastAPI(
 
 # Configure CORS
 # Allow localhost for development and any deployed frontend URL
-import os
-allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
+allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:5176,http://localhost:5177").split(",")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
@@ -67,3 +70,56 @@ async def create_moment(request: Request):
     
     moments_data.append(new_moment)
     return {"moment": new_moment}
+
+
+# Google OAuth Models
+class GoogleAuthRequest(BaseModel):
+    id_token: str
+
+
+@app.post("/auth/google")
+async def auth_google(request_body: GoogleAuthRequest):
+    """
+    Authenticate with Google ID token
+    Returns access token and user info
+    """
+    try:
+        # Verify the Google ID token
+        CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "632365523992-df065eqhlv3kh0io083e1bn6v54ggeee.apps.googleusercontent.com")
+        
+        idinfo = id_token.verify_oauth2_token(
+            request_body.id_token,
+            requests.Request(),
+            CLIENT_ID
+        )
+        
+        # Extract user information
+        user_email = idinfo.get("email")
+        user_name = idinfo.get("name", user_email)
+        user_picture = idinfo.get("picture", "")
+        user_id = idinfo.get("sub")
+        
+        # In a real app, you would:
+        # 1. Check if user exists in your database
+        # 2. Create user if doesn't exist
+        # 3. Generate your own JWT token
+        # 4. Return token + user info
+        
+        # For now, return a simple access token (in production, use proper JWT)
+        import hashlib
+        access_token = hashlib.sha256(f"{user_id}{user_email}".encode()).hexdigest()
+        
+        return {
+            "access_token": access_token,
+            "user": {
+                "id": user_id,
+                "email": user_email,
+                "name": user_name,
+                "picture": user_picture,
+            }
+        }
+    except ValueError as e:
+        # Invalid token
+        raise HTTPException(status_code=401, detail=f"Invalid Google ID token: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Authentication error: {str(e)}")
