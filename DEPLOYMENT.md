@@ -178,6 +178,18 @@ To update the deployed app:
 ## Notes
 
 - This is **Demo v1** - the app is actively being iterated upon
-- Backend uses in-memory storage (data resets on restart)
-- No authentication or database yet
+- Backend uses SQLite for persistence (stored in `remo.db` file)
+- **SQLite on Render Free Tier**: SQLite database files are stored on the filesystem, which is ephemeral on Render's free tier. This means:
+  - Data persists during the instance lifetime
+  - Data resets when the service restarts or redeploys
+  - For production with persistent data, upgrade to Render's paid tier with persistent disk, or migrate to Postgres
+- Google authentication is supported
 - Videos are loaded from public URLs (no video hosting needed)
+
+### Database Upgrade Path
+
+To migrate from SQLite to Postgres for persistent storage:
+1. Add `psycopg2` or `asyncpg` to `requirements.txt`
+2. Update `db.py` to use Postgres connection string from `DATABASE_URL`
+3. Ensure `DATABASE_URL` is set in Render environment variables
+4. Database schema remains compatible (SQLite and Postgres use similar SQL)

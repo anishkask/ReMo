@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import './App.css'
-import { checkHealth, getRoot, getMoments, addMoment } from './services/api'
+import { checkHealth, getRoot, getMoments, addMoment, authGoogle } from './services/api'
+import GoogleAuthButton from './components/GoogleAuthButton'
 import VideoPlayer from './components/VideoPlayer'
 import TimelineStrip from './components/TimelineStrip'
 import LiveReactionsFeed from './components/LiveCommentsFeed'
@@ -59,18 +60,51 @@ function App() {
   const [showImportModal, setShowImportModal] = useState(false)
   const [reconnectingVideoId, setReconnectingVideoId] = useState(null)
   const [customVideos, setCustomVideos] = useState([])
+  const [authUser, setAuthUser] = useState(null)
   const videoPlayerRef = useRef(null)
 
-  // Load display name from localStorage on mount
+  // DEBUG: Log origin and client ID on mount
   useEffect(() => {
-    const savedName = localStorage.getItem('remoDisplayName')
-    if (savedName) {
-      setDisplayName(savedName)
-    } else {
-      // Prompt for name on first visit
-      setShowNamePrompt(true)
+    console.log('=== Google OAuth Debug (App.jsx) ===')
+    console.log('origin:', window.location.origin)
+    console.log('clientId:', import.meta.env.VITE_GOOGLE_CLIENT_ID)
+    console.log('===================================')
+  }, [])
+
+  // Load auth state from localStorage on mount
+  useEffect(() => {
+    const savedToken = localStorage.getItem('remo_access_token')
+    const savedUser = localStorage.getItem('remo_auth_user')
+    
+    if (savedToken && savedUser) {
+      try {
+        const user = JSON.parse(savedUser)
+        setAuthUser(user)
+        // Use Google user's name as display name
+        if (user.name) {
+          setDisplayName(user.name)
+        }
+      } catch (error) {
+        console.error('Failed to load auth user:', error)
+        // Clear invalid data
+        localStorage.removeItem('remo_access_token')
+        localStorage.removeItem('remo_auth_user')
+      }
     }
   }, [])
+
+  // Load display name from localStorage on mount (fallback if not authenticated)
+  useEffect(() => {
+    if (!authUser) {
+      const savedName = localStorage.getItem('remoDisplayName')
+      if (savedName) {
+        setDisplayName(savedName)
+      } else {
+        // Prompt for name on first visit (only if not authenticated)
+        setShowNamePrompt(true)
+      }
+    }
+  }, [authUser])
 
   // Load imported videos and hydrate local video URLs
   useEffect(() => {
@@ -113,10 +147,48 @@ function App() {
     }
   }, [localVideoUrls])
 
-  // Save display name to localStorage when it changes
+  // Handle Google sign in
+  const handleGoogleSignIn = async (idToken) => {
+    try {
+      const response = await authGoogle(idToken)
+      
+      // Store access token and user
+      localStorage.setItem('remo_access_token', response.access_token)
+      localStorage.setItem('remo_auth_user', JSON.stringify(response.user))
+      
+      // Update state
+      setAuthUser(response.user)
+      setDisplayName(response.user.name || response.user.email)
+      
+      return true
+    } catch (error) {
+      console.error('Google sign in failed:', error)
+      throw error
+    }
+  }
+
+  // Handle Google sign out
+  const handleGoogleSignOut = () => {
+    localStorage.removeItem('remo_access_token')
+    localStorage.removeItem('remo_auth_user')
+    setAuthUser(null)
+    
+    // Fall back to guest mode
+    const savedName = localStorage.getItem('remoDisplayName')
+    if (savedName) {
+      setDisplayName(savedName)
+    } else {
+      setShowNamePrompt(true)
+    }
+  }
+
+  // Save display name to localStorage when it changes (only for guest mode)
   const handleSetDisplayName = (name) => {
     setDisplayName(name)
-    localStorage.setItem('remoDisplayName', name)
+    // Only save to localStorage if not authenticated (guest mode)
+    if (!authUser) {
+      localStorage.setItem('remoDisplayName', name)
+    }
     setShowNamePrompt(false)
   }
 
@@ -410,7 +482,14 @@ function App() {
   }
 
   const handleAddComment = (momentId, commentText, timestampSeconds) => {
-    if (!commentText.trim() || !selectedVideoId || !displayName) return
+    if (!commentText.trim() || !selectedVideoId) return
+    
+    // Use auth user name if signed in, otherwise use displayName (guest)
+    const authorName = authUser 
+      ? (authUser.name || authUser.email || 'User')
+      : displayName
+    
+    if (!authorName) return
 
     // Format timestamp
     const timestamp = formatSecondsToTimestamp(timestampSeconds)
@@ -440,7 +519,7 @@ function App() {
     const newComment = {
       id: commentId,
       text: commentText.trim(),
-      author: displayName,
+      author: authorName,
       createdAt: createdAtISO
     }
 
@@ -459,7 +538,7 @@ function App() {
       timestampSeconds: timestampSeconds,
       timestampLabel: timestamp,
       text: commentText.trim(),
-      displayName: displayName,
+      displayName: authorName,
       createdAtISO: createdAtISO
     }
     saveComment(selectedVideoId, commentToStore)
@@ -609,19 +688,40 @@ function App() {
             <h1>ReMo</h1>
             <p className="subtitle">Real-time Media Moments</p>
       </div>
-          {displayName && (
-            <div className="display-name-indicator">
-              <span className="name-label">Guest:</span>
-              <span className="name-value">{displayName}</span>
-              <button 
-                className="change-name-button"
-                onClick={() => setShowNamePrompt(true)}
-                title="Change display name"
-              >
-                ✎
-        </button>
-            </div>
-          )}
+          <div className="header-auth-section">
+            {authUser ? (
+              <>
+                <GoogleAuthButton
+                  onSignIn={handleGoogleSignIn}
+                  onSignOut={handleGoogleSignOut}
+                  isSignedIn={true}
+                  user={authUser}
+                />
+                <span className="auth-badge">Signed in with Google</span>
+              </>
+            ) : (
+              <>
+                <GoogleAuthButton
+                  onSignIn={handleGoogleSignIn}
+                  onSignOut={handleGoogleSignOut}
+                  isSignedIn={false}
+                />
+                {displayName && (
+                  <div className="display-name-indicator">
+                    <span className="name-label">Guest:</span>
+                    <span className="name-value">{displayName}</span>
+                    <button 
+                      className="change-name-button"
+                      onClick={() => setShowNamePrompt(true)}
+                      title="Change display name"
+                    >
+                      ✎
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </div>
       </header>
       
@@ -779,6 +879,7 @@ function App() {
                 <AddCommentBar
                   currentTime={currentTime}
                   displayName={displayName}
+                  authUser={authUser}
                   onAddComment={handleAddComment}
                   onRequestName={() => setShowNamePrompt(true)}
                 />
@@ -793,10 +894,8 @@ function App() {
           currentName={displayName}
           onSetName={handleSetDisplayName}
           onClose={() => {
-            // Only allow closing if name is already set
-            if (displayName && displayName.trim()) {
-              setShowNamePrompt(false)
-            }
+            // Allow closing without setting a name - user can sign in with Google instead
+            setShowNamePrompt(false)
           }}
         />
       )}

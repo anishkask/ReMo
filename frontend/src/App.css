@@ -76,6 +76,78 @@
   min-width: 200px;
 }
 
+.header-auth-section {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.google-auth-button-container {
+  display: flex;
+  align-items: center;
+}
+
+.google-auth-signed-in {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.google-user-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.google-user-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid rgba(79, 195, 247, 0.3);
+}
+
+.google-user-name {
+  font-weight: 600;
+  color: rgba(255, 251, 240, 0.9);
+  font-size: 0.9rem;
+}
+
+.auth-badge {
+  font-size: 0.75rem;
+  color: rgba(255, 251, 240, 0.6);
+  font-style: italic;
+}
+
+.google-sign-out-button {
+  padding: 0.5rem 1rem;
+  background: rgba(224, 247, 250, 0.2);
+  border: 1px solid rgba(79, 195, 247, 0.3);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  color: rgba(255, 251, 240, 0.9);
+}
+
+.google-sign-out-button:hover {
+  background: rgba(224, 247, 250, 0.3);
+  border-color: rgba(79, 195, 247, 0.5);
+  color: #FFFBF0;
+}
+
+.app:not(.menu-mode) .google-user-name,
+.app:not(.menu-mode) .google-sign-out-button,
+.app:not(.menu-mode) .auth-badge {
+  color: rgba(255, 251, 240, 0.9);
+}
+
+.app.menu-mode .google-user-name,
+.app.menu-mode .google-sign-out-button,
+.app.menu-mode .auth-badge {
+  color: rgba(255, 251, 240, 0.9);
+}
+
 @media (max-width: 768px) {
   .header-content {
     flex-direction: column;

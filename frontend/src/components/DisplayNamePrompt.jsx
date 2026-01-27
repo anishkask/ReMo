@@ -32,18 +32,15 @@ function DisplayNamePrompt({ currentName, onSetName, onClose }) {
     }
   }
 
-  // Only allow closing if a name is already set
-  const canClose = Boolean(currentName && currentName.trim())
-
   return (
     <div 
       className="display-name-prompt-overlay" 
-      onClick={canClose ? onClose : undefined}
+      onClick={onClose}
     >
       <div className="display-name-prompt-card" onClick={(e) => e.stopPropagation()}>
         <h3>Set Your Display Name</h3>
         <p className="prompt-description">
-          Choose a name to appear on your comments. This is saved locally and won't be shared.
+          Choose a name to appear on your comments, or sign in with Google for a better experience.
         </p>
         <form onSubmit={handleSubmit}>
           <input
@@ -63,11 +60,9 @@ function DisplayNamePrompt({ currentName, onSetName, onClose }) {
             <button type="submit" className="prompt-submit">
               {currentName ? 'Update Name' : 'Set Name'}
             </button>
-            {currentName && (
-              <button type="button" className="prompt-cancel" onClick={onClose}>
-                Cancel
-              </button>
-            )}
+            <button type="button" className="prompt-cancel" onClick={onClose}>
+              {currentName ? 'Cancel' : 'Skip'}
+            </button>
           </div>
         </form>
       </div>
