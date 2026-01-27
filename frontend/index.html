@@ -5,6 +5,21 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>frontend</title>
+    <script>
+      // CRITICAL: Remove trailing slash from root URL IMMEDIATELY
+      // Google Cloud Console doesn't allow trailing slashes in authorized origins
+      (function() {
+        var href = window.location.href;
+        var origin = window.location.origin;
+        
+        // If URL has trailing slash, remove it immediately
+        if (href === origin + '/') {
+          // Use replaceState to change URL without page reload
+          // This must happen before Google's script loads to fix the referer header
+          window.history.replaceState(null, '', origin);
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

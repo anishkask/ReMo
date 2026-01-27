@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { formatSecondsToTimestamp } from '../utils/time'
 
-function AddCommentBar({ currentTime, displayName, onAddComment, onRequestName }) {
+function AddCommentBar({ currentTime, displayName, authUser, onAddComment, onRequestName }) {
   const [commentText, setCommentText] = useState('')
 
   // Round current time to nearest second for placeholder
@@ -10,7 +10,11 @@ function AddCommentBar({ currentTime, displayName, onAddComment, onRequestName }
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    if (!commentText.trim() || !displayName) return
+    // Use authUser name if signed in, otherwise require displayName (guest)
+    const authorName = authUser 
+      ? (authUser.name || authUser.email || 'User')
+      : displayName
+    if (!commentText.trim() || !authorName) return
 
     // Create a moment ID based on current time (for demo, we'll use timestamp as ID)
     const momentId = `moment-${timestampLabel.replace(/:/g, '-')}`
@@ -21,7 +25,10 @@ function AddCommentBar({ currentTime, displayName, onAddComment, onRequestName }
     }
   }
 
-  if (!displayName) {
+  // Check if user has identity (either auth or guest display name)
+  const hasIdentity = authUser || displayName
+  
+  if (!hasIdentity) {
     return (
       <div className="add-comment-bar">
         <div className="name-required-message">
