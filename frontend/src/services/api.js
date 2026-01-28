@@ -82,3 +82,43 @@ export async function authGoogle(idToken) {
     body: JSON.stringify({ id_token: idToken }),
   });
 }
+
+/**
+ * Get all videos
+ */
+export async function getVideos() {
+  return apiRequest('/videos');
+}
+
+/**
+ * Get a single video by ID
+ */
+export async function getVideo(videoId) {
+  return apiRequest(`/videos/${videoId}`);
+}
+
+/**
+ * Get comments for a video
+ */
+export async function getComments(videoId) {
+  return apiRequest(`/videos/${videoId}/comments`);
+}
+
+/**
+ * Create a comment for a video
+ */
+export async function postComment(videoId, comment) {
+  return apiRequest(`/videos/${videoId}/comments`, {
+    method: 'POST',
+    body: JSON.stringify(comment),
+  });
+}
+
+/**
+ * Seed database with sample videos
+ */
+export async function seedDatabase() {
+  return apiRequest('/seed', {
+    method: 'POST',
+  });
+}

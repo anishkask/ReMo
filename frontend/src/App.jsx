@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import './App.css'
-import { checkHealth, getRoot, getMoments, addMoment, authGoogle } from './services/api'
+import { checkHealth, getRoot, getMoments, addMoment, authGoogle, getVideos, getComments, postComment, seedDatabase } from './services/api'
 import VideoPlayer from './components/VideoPlayer'
 import TimelineStrip from './components/TimelineStrip'
 import LiveReactionsFeed from './components/LiveCommentsFeed'
@@ -14,31 +14,7 @@ import { loadCustomVideos, removeCustomVideo } from './utils/customVideos'
 import { loadCommentsForVideo, saveComment, groupCommentsByMoment } from './utils/comments'
 import VideoImportCard from './components/VideoImportCard'
 
-// Available videos for demo
-// You can change these to any video URLs or local files
-const VIDEOS = [
-  {
-    id: '1',
-    title: 'Big Buck Bunny',
-    src: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4'
-  },
-  {
-    id: '2',
-    title: 'Elephant\'s Dream',
-    src: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4'
-  },
-  {
-    id: '3',
-    title: 'For Bigger Blazes',
-    src: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4'
-  }
-  // Add more videos here:
-  // {
-  //   id: '4',
-  //   title: 'Your Video Title',
-  //   src: 'https://your-video-url.com/video.mp4'
-  // }
-]
+// Note: Videos are now loaded from the backend API (see useEffect below)
 
 function App() {
   const [apiStatus, setApiStatus] = useState('checking...')
@@ -61,26 +37,34 @@ function App() {
   const [showImportModal, setShowImportModal] = useState(false)
   const [reconnectingVideoId, setReconnectingVideoId] = useState(null)
   const [customVideos, setCustomVideos] = useState([])
+  const [apiVideos, setApiVideos] = useState([])
+  const [videosLoading, setVideosLoading] = useState(false)
+  const [videosError, setVideosError] = useState(null)
   const videoPlayerRef = useRef(null)
 
   // Load display name and auth state from localStorage on mount
   useEffect(() => {
-    const savedName = localStorage.getItem('remoDisplayName')
-    if (savedName) {
-      setDisplayName(savedName)
-    }
-    
-    // Check for saved auth user
+    // Check for saved auth user first
     const savedAuthUser = localStorage.getItem('remo_auth_user')
     if (savedAuthUser) {
       try {
         setAuthUser(JSON.parse(savedAuthUser))
         const user = JSON.parse(savedAuthUser)
-        if (user.name) {
+        // Check for custom display name first, then fall back to Google name
+        const customDisplayName = localStorage.getItem('remoCustomDisplayName')
+        if (customDisplayName) {
+          setDisplayName(customDisplayName)
+        } else if (user.name) {
           setDisplayName(user.name)
         }
       } catch (error) {
         console.error('Failed to load auth user:', error)
+      }
+    } else {
+      // Guest mode - use regular display name
+      const savedName = localStorage.getItem('remoDisplayName')
+      if (savedName) {
+        setDisplayName(savedName)
       }
     }
   }, [])
@@ -147,7 +131,13 @@ function App() {
       
       // Update state
       setAuthUser(response.user)
-      setDisplayName(response.user.name || response.user.email)
+      // Check for custom display name first, then use Google name
+      const customDisplayName = localStorage.getItem('remoCustomDisplayName')
+      if (customDisplayName) {
+        setDisplayName(customDisplayName)
+      } else {
+        setDisplayName(response.user.name || response.user.email)
+      }
       
       return true
     } catch (error) {
@@ -162,6 +152,9 @@ function App() {
     localStorage.removeItem('remo_auth_user')
     setAuthUser(null)
     
+    // Clear custom display name when signing out
+    localStorage.removeItem('remoCustomDisplayName')
+    
     // Fall back to guest mode if display name exists
     const savedName = localStorage.getItem('remoDisplayName')
     if (savedName) {
@@ -174,13 +167,36 @@ function App() {
   // Save display name to localStorage when it changes
   const handleSetDisplayName = (name) => {
     setDisplayName(name)
-    localStorage.setItem('remoDisplayName', name)
+    // Store in different keys based on auth status
+    if (authUser) {
+      localStorage.setItem('remoCustomDisplayName', name)
+    } else {
+      localStorage.setItem('remoDisplayName', name)
+      // Clear custom display name if switching to guest
+      localStorage.removeItem('remoCustomDisplayName')
+    }
     setShowNamePrompt(false)
   }
 
-  // Merge sample videos with imported videos and custom videos
+  // Handle guest sign out - clear display name and return to home
+  const handleGuestSignOut = () => {
+    setDisplayName('')
+    localStorage.removeItem('remoDisplayName')
+    setSelectedVideoId(null)
+    setShowMenu(true)
+    setSelectedMoment(null)
+    setFollowLive(true)
+    setCurrentTime(0)
+  }
+
+  // Merge API videos with imported videos and custom videos
   const allVideos = [
-    ...VIDEOS.map(v => ({ ...v, sourceType: 'sample', src: v.src })),
+    ...apiVideos.map(v => ({ 
+      ...v, 
+      sourceType: 'api', 
+      src: v.video_url,
+      title: v.title
+    })),
     ...importedVideos.map(v => ({
       ...v,
       src: v.sourceType === 'local' 
@@ -298,6 +314,32 @@ function App() {
       })
   }, [])
 
+  // Load videos from API when backend is connected
+  useEffect(() => {
+    if (apiStatus === 'connected') {
+      setVideosLoading(true)
+      setVideosError(null)
+      
+      getVideos()
+        .then((videos) => {
+          // If no videos, seed the database
+          if (videos.length === 0) {
+            return seedDatabase().then(() => getVideos())
+          }
+          return videos
+        })
+        .then((videos) => {
+          setApiVideos(videos)
+          setVideosLoading(false)
+        })
+        .catch((error) => {
+          console.error('Failed to load videos:', error)
+          setVideosError('Failed to load videos from backend')
+          setVideosLoading(false)
+        })
+    }
+  }, [apiStatus])
+
   useEffect(() => {
     // Load moments when backend is connected
     if (apiStatus === 'connected') {
@@ -312,9 +354,9 @@ function App() {
           const momentsForAllVideos = {}
           const commentsForAllVideos = {}
           
-          // Initialize moments for all videos (sample + imported + custom)
+          // Initialize moments for all videos (API + imported + custom)
           const allVideoIds = [
-            ...VIDEOS.map(v => v.id),
+            ...apiVideos.map(v => v.id),
             ...importedVideos.map(v => v.id),
             ...customVideos.map(v => v.id)
           ]
@@ -382,7 +424,99 @@ function App() {
           console.error('Failed to load moments:', error)
         })
     }
-  }, [apiStatus, importedVideos, customVideos])
+  }, [apiStatus, importedVideos, customVideos, apiVideos])
+
+  // Load comments from backend when video is selected (for API videos)
+  useEffect(() => {
+    if (!selectedVideoId || apiStatus !== 'connected') return
+
+    const currentVideo = allVideos.find(v => v.id === selectedVideoId)
+    const isApiVideo = currentVideo?.sourceType === 'api'
+
+    if (isApiVideo) {
+      // Fetch comments from backend
+      getComments(selectedVideoId)
+        .then((backendComments) => {
+          console.log(`Loaded ${backendComments.length} comments from backend for video ${selectedVideoId}`)
+          
+          // Get moments for this video
+          const videoMoments = momentsByVideoId[selectedVideoId] || []
+          
+          // Convert backend comment format to frontend format
+          const convertedComments = backendComments.map(comment => ({
+            id: comment.id,
+            text: comment.body,
+            author: comment.author_name || 'Anonymous',
+            createdAt: comment.created_at,
+            timestampSeconds: comment.timestamp_seconds || 0
+          }))
+
+          // Group comments by moment
+          const commentsByMoment = groupCommentsByMoment(
+            convertedComments.map(c => ({
+              id: c.id,
+              timestampSeconds: c.timestampSeconds,
+              timestampLabel: formatSecondsToTimestamp(c.timestampSeconds),
+              text: c.text,
+              displayName: c.author,
+              createdAtISO: c.createdAt
+            })),
+            videoMoments
+          )
+
+          // Merge with existing comments (preserve any localStorage comments for this video)
+          setCommentsByVideoId(prev => {
+            const existingComments = prev[selectedVideoId] || {}
+            const mergedComments = { ...commentsByMoment }
+            
+            // Keep any existing comments that aren't from backend (for backward compatibility)
+            Object.keys(existingComments).forEach(momentId => {
+              const existingMomentComments = existingComments[momentId] || []
+              const backendMomentComments = commentsByMoment[momentId] || []
+              const backendIds = new Set(backendMomentComments.map(c => c.id))
+              const localOnlyComments = existingMomentComments.filter(c => !backendIds.has(c.id))
+              
+              if (localOnlyComments.length > 0) {
+                mergedComments[momentId] = [...backendMomentComments, ...localOnlyComments]
+              } else if (backendMomentComments.length > 0) {
+                mergedComments[momentId] = backendMomentComments
+              } else if (existingMomentComments.length > 0) {
+                mergedComments[momentId] = existingMomentComments
+              }
+            })
+            
+            return {
+              ...prev,
+              [selectedVideoId]: mergedComments
+            }
+          })
+        })
+        .catch((error) => {
+          console.error('Failed to load comments from backend:', error)
+          // Fall back to localStorage if backend fails
+          const storedComments = loadCommentsForVideo(selectedVideoId)
+          if (storedComments.length > 0) {
+            const videoMoments = momentsByVideoId[selectedVideoId] || []
+            const grouped = groupCommentsByMoment(storedComments, videoMoments)
+            setCommentsByVideoId(prev => ({
+              ...prev,
+              [selectedVideoId]: grouped
+            }))
+          }
+        })
+    } else {
+      // For non-API videos, load from localStorage
+      const storedComments = loadCommentsForVideo(selectedVideoId)
+      if (storedComments.length > 0) {
+        const videoMoments = momentsByVideoId[selectedVideoId] || []
+        const grouped = groupCommentsByMoment(storedComments, videoMoments)
+        setCommentsByVideoId(prev => ({
+          ...prev,
+          [selectedVideoId]: grouped
+        }))
+      }
+    }
+  }, [selectedVideoId, apiStatus, momentsByVideoId, allVideos])
 
   const handleTimeUpdate = (time) => {
     setCurrentTime(time)
@@ -467,13 +601,13 @@ function App() {
     }
   }
 
-  const handleAddComment = (momentId, commentText, timestampSeconds) => {
+  const handleAddComment = async (momentId, commentText, timestampSeconds) => {
     if (!commentText.trim() || !selectedVideoId) return
     
-    // Use auth user name if signed in, otherwise require displayName
-    const authorName = authUser 
+    // Use custom display name if set, otherwise use auth user name or guest display name
+    const authorName = displayName || (authUser 
       ? (authUser.name || authUser.email || 'User')
-      : displayName
+      : null)
     
     if (!authorName) return
 
@@ -498,36 +632,116 @@ function App() {
       }))
     }
 
-    // Generate unique ID
-    const commentId = crypto.randomUUID ? crypto.randomUUID() : `comment-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
-    const createdAtISO = new Date().toISOString()
+    // Check if this is an API video
+    const currentVideo = allVideos.find(v => v.id === selectedVideoId)
+    const isApiVideo = currentVideo?.sourceType === 'api'
 
-    const newComment = {
-      id: commentId,
-      text: commentText.trim(),
-      author: authorName,
-      createdAt: createdAtISO
-    }
-
-    // Update React state immediately (optimistic update)
-    setCommentsByVideoId(prev => ({
-      ...prev,
-      [selectedVideoId]: {
-        ...(prev[selectedVideoId] || {}),
-        [targetMoment.id]: [...((prev[selectedVideoId] || {})[targetMoment.id] || []), newComment]
+    // Save to backend API if API video
+    if (isApiVideo && apiStatus === 'connected') {
+      try {
+        const savedComment = await postComment(selectedVideoId, {
+          author_name: authorName,
+          author_id: authUser?.id || null,
+          timestamp_seconds: timestampSeconds,
+          body: commentText.trim()
+        })
+        console.log('Comment saved to backend:', savedComment)
+        
+        // Use backend comment data
+        const backendComment = {
+          id: savedComment.id,
+          text: savedComment.body,
+          author: savedComment.author_name || authorName,
+          createdAt: savedComment.created_at,
+          timestampSeconds: savedComment.timestamp_seconds || timestampSeconds
+        }
+        
+        // Update state with the saved comment from backend
+        setCommentsByVideoId(prev => {
+          const current = prev[selectedVideoId] || {}
+          const momentComments = current[targetMoment.id] || []
+          
+          // Check if comment already exists (avoid duplicates)
+          const existingIndex = momentComments.findIndex(c => c.id === backendComment.id)
+          let updatedMomentComments
+          if (existingIndex >= 0) {
+            updatedMomentComments = [...momentComments]
+            updatedMomentComments[existingIndex] = backendComment
+          } else {
+            updatedMomentComments = [...momentComments, backendComment]
+          }
+          
+          return {
+            ...prev,
+            [selectedVideoId]: {
+              ...current,
+              [targetMoment.id]: updatedMomentComments
+            }
+          }
+        })
+      } catch (error) {
+        console.error('Failed to save comment to API:', error)
+        // Fall back to localStorage for persistence
+        const commentId = crypto.randomUUID ? crypto.randomUUID() : `comment-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+        const createdAtISO = new Date().toISOString()
+        const newComment = {
+          id: commentId,
+          text: commentText.trim(),
+          author: authorName,
+          createdAt: createdAtISO
+        }
+        
+        // Update React state (optimistic update)
+        setCommentsByVideoId(prev => ({
+          ...prev,
+          [selectedVideoId]: {
+            ...(prev[selectedVideoId] || {}),
+            [targetMoment.id]: [...((prev[selectedVideoId] || {})[targetMoment.id] || []), newComment]
+          }
+        }))
+        
+        // Save to localStorage as fallback
+        const commentToStore = {
+          id: commentId,
+          timestampSeconds: timestampSeconds,
+          timestampLabel: timestamp,
+          text: commentText.trim(),
+          displayName: authorName,
+          createdAtISO: createdAtISO
+        }
+        saveComment(selectedVideoId, commentToStore)
       }
-    }))
-
-    // Persist to localStorage
-    const commentToStore = {
-      id: commentId,
-      timestampSeconds: timestampSeconds,
-      timestampLabel: timestamp,
-      text: commentText.trim(),
-      displayName: displayName,
-      createdAtISO: createdAtISO
+    } else {
+      // For non-API videos, save to localStorage
+      const commentId = crypto.randomUUID ? crypto.randomUUID() : `comment-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+      const createdAtISO = new Date().toISOString()
+      const newComment = {
+        id: commentId,
+        text: commentText.trim(),
+        author: authorName,
+        createdAt: createdAtISO
+      }
+      
+      // Update React state
+      setCommentsByVideoId(prev => ({
+        ...prev,
+        [selectedVideoId]: {
+          ...(prev[selectedVideoId] || {}),
+          [targetMoment.id]: [...((prev[selectedVideoId] || {})[targetMoment.id] || []), newComment]
+        }
+      }))
+      
+      // Persist to localStorage
+      const commentToStore = {
+        id: commentId,
+        timestampSeconds: timestampSeconds,
+        timestampLabel: timestamp,
+        text: commentText.trim(),
+        displayName: authorName,
+        createdAtISO: createdAtISO
+      }
+      saveComment(selectedVideoId, commentToStore)
     }
-    saveComment(selectedVideoId, commentToStore)
   }
 
   const handleVideoChange = (e) => {
@@ -676,12 +890,25 @@ function App() {
           </div>
           <div className="header-auth-section">
             {authUser ? (
-              <GoogleAuthButton
-                onSignIn={handleGoogleSignIn}
-                onSignOut={handleGoogleSignOut}
-                isSignedIn={true}
-                user={authUser}
-              />
+              <div className="google-auth-with-display-name">
+                <GoogleAuthButton
+                  onSignIn={handleGoogleSignIn}
+                  onSignOut={handleGoogleSignOut}
+                  isSignedIn={true}
+                  user={authUser}
+                />
+                <div className="display-name-indicator google-display-name">
+                  <span className="name-label">Display:</span>
+                  <span className="name-value">{displayName}</span>
+                  <button 
+                    className="change-name-button"
+                    onClick={() => setShowNamePrompt(true)}
+                    title="Change display name"
+                  >
+                    ✎
+                  </button>
+                </div>
+              </div>
             ) : displayName ? (
               <div className="display-name-indicator">
                 <span className="name-label">Guest:</span>
@@ -692,6 +919,13 @@ function App() {
                   title="Change display name"
                 >
                   ✎
+                </button>
+                <button 
+                  className="guest-sign-out-button"
+                  onClick={handleGuestSignOut}
+                  title="Sign out"
+                >
+                  Sign Out
                 </button>
               </div>
             ) : (
@@ -888,6 +1122,7 @@ function App() {
             // Allow closing - user can set name later or sign in with Google
             setShowNamePrompt(false)
           }}
+          isGoogleUser={!!authUser}
         />
       )}
 

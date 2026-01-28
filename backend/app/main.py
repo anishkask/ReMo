@@ -1,12 +1,65 @@
 """
 ReMo Backend - FastAPI Application Entry Point
 """
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from google.auth.transport import requests
 from google.oauth2 import id_token
+from sqlalchemy import create_engine, Column, String, Integer, Float, DateTime, ForeignKey, Text
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session, relationship
+from datetime import datetime
+from typing import List, Optional
 import os
+import uuid
+
+# Database setup
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./remo.db")
+engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {})
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+# Database Models
+class Video(Base):
+    __tablename__ = "videos"
+    
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    owner_id = Column(String, nullable=True)
+    title = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    storage_provider = Column(String, nullable=True)  # 's3'|'supabase'|'gcs'|None
+    object_key = Column(String, nullable=True)
+    video_url = Column(String, nullable=False)
+    thumbnail_url = Column(String, nullable=True)
+    duration_seconds = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    comments = relationship("Comment", back_populates="video", cascade="all, delete-orphan")
+
+class Comment(Base):
+    __tablename__ = "comments"
+    
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    video_id = Column(String, ForeignKey("videos.id"), nullable=False)
+    author_name = Column(String, nullable=True)
+    author_id = Column(String, nullable=True)
+    timestamp_seconds = Column(Float, nullable=False)
+    body = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    video = relationship("Video", back_populates="comments")
+
+# Create tables
+Base.metadata.create_all(bind=engine)
+
+# Dependency to get DB session
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 app = FastAPI(
     title="ReMo API",
@@ -36,6 +89,143 @@ async def root():
 async def health():
     """Health check endpoint"""
     return {"status": "healthy"}
+
+
+# Pydantic models for request/response
+class VideoResponse(BaseModel):
+    id: str
+    owner_id: Optional[str] = None
+    title: str
+    description: Optional[str] = None
+    storage_provider: Optional[str] = None
+    object_key: Optional[str] = None
+    video_url: str
+    thumbnail_url: Optional[str] = None
+    duration_seconds: Optional[int] = None
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+class CommentCreate(BaseModel):
+    author_name: Optional[str] = None
+    author_id: Optional[str] = None
+    timestamp_seconds: float
+    body: str
+
+class CommentResponse(BaseModel):
+    id: str
+    video_id: str
+    author_name: Optional[str] = None
+    author_id: Optional[str] = None
+    timestamp_seconds: float
+    body: str
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+# Video endpoints
+@app.get("/videos", response_model=List[VideoResponse])
+async def get_videos(db: Session = Depends(get_db)):
+    """Get all videos"""
+    videos = db.query(Video).order_by(Video.created_at.desc()).all()
+    return videos
+
+@app.get("/videos/{video_id}", response_model=VideoResponse)
+async def get_video(video_id: str, db: Session = Depends(get_db)):
+    """Get a single video by ID"""
+    video = db.query(Video).filter(Video.id == video_id).first()
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+    return video
+
+@app.get("/videos/{video_id}/comments", response_model=List[CommentResponse])
+async def get_comments(video_id: str, db: Session = Depends(get_db)):
+    """Get all comments for a video, ordered by timestamp then created_at"""
+    # Verify video exists
+    video = db.query(Video).filter(Video.id == video_id).first()
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+    
+    comments = db.query(Comment).filter(
+        Comment.video_id == video_id
+    ).order_by(Comment.timestamp_seconds, Comment.created_at).all()
+    
+    print(f"[BACKEND] GET /videos/{video_id}/comments - Returning {len(comments)} comments")
+    return comments
+
+@app.post("/videos/{video_id}/comments", response_model=CommentResponse)
+async def create_comment(video_id: str, comment: CommentCreate, db: Session = Depends(get_db)):
+    """Create a new comment for a video"""
+    # Verify video exists
+    video = db.query(Video).filter(Video.id == video_id).first()
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+    
+    print(f"[BACKEND] POST /videos/{video_id}/comments - Creating comment: author={comment.author_name}, timestamp={comment.timestamp_seconds}, body={comment.body[:50]}...")
+    
+    # Create comment
+    db_comment = Comment(
+        video_id=video_id,
+        author_name=comment.author_name,
+        author_id=comment.author_id,
+        timestamp_seconds=comment.timestamp_seconds,
+        body=comment.body
+    )
+    db.add(db_comment)
+    db.commit()
+    db.refresh(db_comment)
+    
+    print(f"[BACKEND] Comment created with ID: {db_comment.id}")
+    return db_comment
+
+
+# Seed endpoint for development
+@app.post("/seed")
+async def seed_database(db: Session = Depends(get_db)):
+    """Seed database with sample videos (only if empty)"""
+    existing_count = db.query(Video).count()
+    if existing_count > 0:
+        return {"message": f"Database already has {existing_count} videos. Skipping seed."}
+    
+    sample_videos = [
+        Video(
+            id=str(uuid.uuid4()),
+            title="Big Buck Bunny",
+            description="A sample video from Google's test bucket",
+            video_url="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+            storage_provider=None,
+            duration_seconds=None
+        ),
+        Video(
+            id=str(uuid.uuid4()),
+            title="Elephant's Dream",
+            description="A sample video from Google's test bucket",
+            video_url="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+            storage_provider=None,
+            duration_seconds=None
+        ),
+        Video(
+            id=str(uuid.uuid4()),
+            title="For Bigger Blazes",
+            description="A sample video from Google's test bucket",
+            video_url="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+            storage_provider=None,
+            duration_seconds=None
+        )
+    ]
+    
+    for video in sample_videos:
+        db.add(video)
+    
+    db.commit()
+    
+    return {
+        "message": f"Seeded {len(sample_videos)} sample videos",
+        "videos": [{"id": v.id, "title": v.title} for v in sample_videos]
+    }
 
 
 # In-memory storage for moments

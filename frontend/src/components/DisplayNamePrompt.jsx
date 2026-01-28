@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 
-function DisplayNamePrompt({ currentName, onSetName, onClose }) {
+function DisplayNamePrompt({ currentName, onSetName, onClose, isGoogleUser = false }) {
   const [inputName, setInputName] = useState(currentName || '')
   const [error, setError] = useState('')
 
@@ -51,7 +51,9 @@ function DisplayNamePrompt({ currentName, onSetName, onClose }) {
         </button>
         <h3>Set Your Display Name</h3>
         <p className="prompt-description">
-          Choose a name to appear on your comments. This is saved locally and won't be shared.
+          {isGoogleUser 
+            ? "Choose a custom name to appear on your comments. This will override your Google account name. This is saved locally and won't be shared."
+            : "Choose a name to appear on your comments. This is saved locally and won't be shared."}
         </p>
         <form onSubmit={handleSubmit}>
           <input

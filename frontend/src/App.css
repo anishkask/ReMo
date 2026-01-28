@@ -1,23 +1,30 @@
 .app {
   min-height: 100vh;
+  height: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
   padding: 2rem;
   background: linear-gradient(135deg, #E0F7FA 0%, #B2EBF2 50%, #E0F7FA 100%);
   width: 100%;
+  box-sizing: border-box;
 }
 
 .app.menu-mode {
   background: #0A1929;
   padding: 3rem 2rem;
-  width: 100vw;
+  width: 100%;
   align-items: stretch;
+  min-height: 100vh;
+  height: 100%;
+  box-sizing: border-box;
+  overflow-x: hidden;
 }
 
 .app:not(.menu-mode) {
   background: #0A1929;
   padding: 2rem;
+  overflow-x: hidden;
 }
 
 .app.menu-mode .app-header h1 {
@@ -63,24 +70,27 @@
 }
 
 .header-content {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  flex-wrap: wrap;
   gap: 1rem;
-  text-align: center;
+  width: 100%;
 }
 
 .header-content > div:first-child {
-  flex: 1;
-  min-width: 200px;
+  grid-column: 2;
+  text-align: center;
+  justify-self: center;
 }
 
 .header-auth-section {
+  grid-column: 3;
+  justify-self: end;
   display: flex;
   align-items: center;
   gap: 1rem;
 }
+
 
 .auth-buttons {
   display: flex;
@@ -134,7 +144,19 @@
 
 @media (max-width: 768px) {
   .header-content {
-    flex-direction: column;
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+  }
+  
+  .header-content > div:first-child {
+    grid-column: 1;
+  }
+  
+  .header-auth-section {
+    grid-column: 1;
+    justify-self: center;
+    flex-wrap: wrap;
+    justify-content: center;
   }
   
   .display-name-indicator {
@@ -190,6 +212,37 @@
   color: #0288D1;
 }
 
+.guest-sign-out-button {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(79, 195, 247, 0.3);
+  color: #4FC3F7;
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0.4rem 0.75rem;
+  border-radius: 6px;
+  transition: all 0.2s;
+  font-weight: 500;
+  margin-left: 0.25rem;
+}
+
+.guest-sign-out-button:hover {
+  background: rgba(79, 195, 247, 0.2);
+  color: #0288D1;
+  border-color: #4FC3F7;
+}
+
+.app.menu-mode .guest-sign-out-button {
+  background: rgba(255, 251, 240, 0.15);
+  color: rgba(255, 251, 240, 0.9);
+  border-color: rgba(255, 251, 240, 0.4);
+}
+
+.app.menu-mode .guest-sign-out-button:hover {
+  background: rgba(255, 251, 240, 0.25);
+  color: #FFFBF0;
+  border-color: rgba(255, 251, 240, 0.6);
+}
+
 /* Google Auth Button Styles */
 .google-auth-button-container {
   display: inline-block;
@@ -199,6 +252,17 @@
   display: flex;
   align-items: center;
   gap: 0.75rem;
+}
+
+.google-auth-with-display-name {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.google-display-name {
+  margin-left: 0;
 }
 
 .google-user-info {
@@ -336,6 +400,7 @@
   font-size: 1rem;
   margin-bottom: 0.5rem;
   background: white;
+  color: #212121;
   transition: border-color 0.2s;
 }
 
@@ -971,25 +1036,15 @@
 
 .video-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 2rem;
   width: 100%;
   margin-bottom: 2.5rem;
+  padding: 0;
+  box-sizing: border-box;
 }
 
-@media (max-width: 1024px) {
-  .video-grid {
-    grid-template-columns: repeat(2, 1fr);
-    gap: 1.5rem;
-  }
-}
-
-@media (max-width: 768px) {
-  .video-grid {
-    grid-template-columns: 1fr;
-    gap: 1.5rem;
-  }
-}
+/* Video grid is now responsive with auto-fit, so media queries are handled automatically */
 
 .video-card {
   background: #FFFBF0;
