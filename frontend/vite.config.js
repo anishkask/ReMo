@@ -7,6 +7,6 @@ export default defineConfig({
   server: {
     host: 'localhost',
     port: 5177,
-    strictPort: false,
+    strictPort: true, // Enforce port 5177 - fail if port is in use instead of auto-incrementing
   },
 })

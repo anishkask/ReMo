@@ -69,13 +69,17 @@ app = FastAPI(
 
 # Configure CORS
 # Allow localhost for development and any deployed frontend URL
-allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:5176,http://localhost:5177").split(",")
+# Ensure localhost:5177 is included for strict port enforcement
+allowed_origins_raw = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:5176,http://localhost:5177")
+allowed_origins = [origin.strip() for origin in allowed_origins_raw.split(",") if origin.strip()]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"],  # Explicit methods including OPTIONS
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 
@@ -87,7 +91,7 @@ async def root():
 
 @app.get("/health")
 async def health():
-    """Health check endpoint"""
+    """Health check endpoint - CORS middleware handles OPTIONS automatically"""
     return {"status": "healthy"}
 
 

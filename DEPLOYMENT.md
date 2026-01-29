@@ -22,9 +22,12 @@ This guide walks you through deploying ReMo to production as a live demo.
    - **Name**: `remo-backend` (or your preferred name)
    - **Region**: Choose closest to your users
    - **Branch**: `main` (or your default branch)
-   - **Root Directory**: `backend`
-   - **Runtime**: `Python 3` (will use Python 3.11.9 from `runtime.txt`)
+   - **Root Directory**: `backend` ⚠️ **CRITICAL**: Must be exactly `backend` (not empty, not `./backend`)
+     - This tells Render to use `backend/` as the service root
+     - Render will look for `runtime.txt` in this directory to determine Python version
+   - **Runtime**: `Python 3` (Render will use Python 3.11.9 from `backend/runtime.txt`)
    - **Build Command**: `python -m pip install --upgrade pip setuptools wheel && pip install -r requirements.txt`
+     - This ensures `pydantic-core` installs from wheels (avoids Rust/Cargo build failures)
    - **Start Command**: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
 
 ### 1.2 Set Environment Variables
@@ -32,7 +35,7 @@ This guide walks you through deploying ReMo to production as a live demo.
 In the Render dashboard, go to **Environment** section and add:
 
 ```
-ALLOWED_ORIGINS=https://your-frontend-url.vercel.app,http://localhost:5173
+ALLOWED_ORIGINS=https://your-frontend-url.vercel.app,http://localhost:5173,http://localhost:5177
 ```
 
 **Note**: Replace `https://your-frontend-url.vercel.app` with your actual frontend URL (you'll get this after deploying the frontend). For now, you can add it later or use a placeholder and update it.
@@ -45,28 +48,142 @@ ALLOWED_ORIGINS=https://your-frontend-url.vercel.app,http://localhost:5173
 
 ---
 
-## Render Backend
+## Render Backend Configuration
 
-### Configuration Details
+### Critical Settings
 
-- **Root Directory**: `backend`
-  - Render builds from the `backend/` directory, which contains `requirements.txt` and `runtime.txt`
-  - The `runtime.txt` file specifies Python 3.11.9 to avoid compatibility issues with newer Python versions
+**⚠️ IMPORTANT**: Render defaults to Python 3.13.4, which causes `pydantic-core` to build from source (Rust/Cargo), leading to build failures due to read-only filesystem. The `runtime.txt` file forces Python 3.11.9, which has pre-built wheels for all dependencies.
 
-- **Build Command**: 
-  ```bash
-  python -m pip install --upgrade pip setuptools wheel && pip install -r requirements.txt
-  ```
-  - Upgrades pip, setuptools, and wheel before installing dependencies
-  - Ensures proper wheel installation for packages like `pydantic-core` (avoids building from source)
+#### Required Configuration
 
-- **Start Command**: 
-  ```bash
-  uvicorn app.main:app --host 0.0.0.0 --port $PORT
-  ```
-  - Starts the FastAPI application using uvicorn
-  - Binds to `0.0.0.0` to accept external connections
-  - Uses `$PORT` environment variable provided by Render
+1. **Root Directory**: `backend`
+   - This is the directory Render uses as the service root
+   - Must contain `requirements.txt` and `runtime.txt`
+   - All paths in build/start commands are relative to this directory
+
+2. **Runtime**: `Python 3`
+   - Render will automatically detect and use Python version from `backend/runtime.txt`
+   - The `runtime.txt` file must contain exactly: `python-3.11.9`
+
+3. **Build Command**:
+   ```bash
+   python -m pip install --upgrade pip setuptools wheel && pip install -r requirements.txt
+   ```
+   - **Why this command**: Upgrades pip, setuptools, and wheel to latest versions before installing dependencies
+   - Ensures `pydantic-core` installs from pre-built wheels (`.whl` files) instead of building from source
+   - Prevents Rust/Cargo build failures on Render's read-only filesystem
+
+4. **Start Command**:
+   ```bash
+   uvicorn app.main:app --host 0.0.0.0 --port $PORT
+   ```
+   - Starts the FastAPI application using uvicorn
+   - Binds to `0.0.0.0` to accept external connections
+   - Uses `$PORT` environment variable provided by Render (required)
+
+### File Structure
+
+Ensure your `backend/` directory contains:
+```
+backend/
+├── app/
+│   └── main.py          # FastAPI application
+├── requirements.txt     # Python dependencies
+└── runtime.txt          # Python version specification (python-3.11.9)
+```
+
+### Clearing Build Cache & Redeploying
+
+If you encounter build issues or need to force a fresh build:
+
+1. **Via Render Dashboard**:
+   - Go to your service → **Settings** → **Clear build cache**
+   - Click **"Clear build cache"**
+   - Trigger a new deploy (push to GitHub or click **"Manual Deploy"**)
+
+2. **Via Manual Deploy**:
+   - Go to your service → **Manual Deploy** → **"Deploy latest commit"**
+   - This forces a fresh build without clearing cache first
+
+3. **After updating `runtime.txt`**:
+   - Push changes to GitHub
+   - Render will auto-detect and redeploy
+   - If Python version doesn't change, clear build cache and redeploy
+
+### Verification Checklist
+
+After deploying, verify that Render is using Python 3.11 and installing wheels correctly:
+
+#### ✅ Check Python Version in Build Logs
+
+1. Go to Render Dashboard → Your service → **Logs** tab
+2. Look for the build log section
+3. **Verify**: You should see one of these messages:
+   - `Python 3.11.9` or `python3.11` in the build output
+   - `Using Python version: 3.11.9` or similar
+   - **NOT** `Python 3.13` or `python3.13`
+
+#### ✅ Check pydantic-core Installation Method
+
+In the build logs, search for `pydantic-core`:
+
+1. **✅ CORRECT** - Installing from wheel:
+   ```
+   Collecting pydantic-core==2.14.1
+   Downloading pydantic_core-2.14.1-cp311-*.whl
+   Installing collected packages: pydantic-core
+   Successfully installed pydantic-core-2.14.1
+   ```
+   - Look for `.whl` file extension
+   - Should see "Downloading" not "Building"
+
+2. **❌ INCORRECT** - Building from source (will fail):
+   ```
+   Collecting pydantic-core==2.14.1
+   Building wheels for pydantic-core
+   Building pydantic-core from source
+   error: Read-only file system: '/usr/local/cargo/...'
+   ```
+   - If you see "Building wheels" or "Building from source", Python 3.11 is NOT being used
+   - If you see Cargo/Rust errors, Python 3.13 is being used
+
+#### ✅ Verify No Cargo/Rust Errors
+
+The build logs should **NOT** contain:
+- `cargo` commands
+- `maturin` build output
+- `error: Read-only file system` related to `/usr/local/cargo/`
+- Any Rust compilation errors
+
+#### ✅ Successful Build Indicators
+
+A successful build should show:
+- ✅ Python 3.11.9 detected and used
+- ✅ `pydantic-core` downloaded as `.whl` file
+- ✅ All packages install successfully
+- ✅ Application starts without errors
+- ✅ Health endpoint responds: `{"status":"healthy"}`
+
+### Troubleshooting Python Version Issues
+
+If Render is still using Python 3.13:
+
+1. **Verify `backend/runtime.txt` exists**:
+   ```bash
+   cat backend/runtime.txt
+   # Should output: python-3.11.9
+   ```
+
+2. **Check Root Directory setting**:
+   - Render Dashboard → Service → Settings → **Root Directory** must be `backend`
+   - Not empty, not `./backend`, just `backend`
+
+3. **Clear build cache and redeploy**:
+   - Settings → Clear build cache → Manual Deploy
+
+4. **Check build logs for Python detection**:
+   - Look for "Detected Python version" or similar messages
+   - If it says 3.13, the `runtime.txt` is not being read correctly
 
 ---
 

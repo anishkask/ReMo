@@ -13,6 +13,7 @@ import { loadVideos, removeVideo, getLocalVideoFile, updateVideo } from './utils
 import { loadCustomVideos, removeCustomVideo } from './utils/customVideos'
 import { loadCommentsForVideo, saveComment, groupCommentsByMoment } from './utils/comments'
 import VideoImportCard from './components/VideoImportCard'
+import { getVersionString } from './utils/version'
 
 // Note: Videos are now loaded from the backend API (see useEffect below)
 
@@ -887,6 +888,9 @@ function App() {
           <div onClick={handleBackToMenu} style={{ cursor: 'pointer' }}>
             <h1>ReMo</h1>
             <p className="subtitle">Real-time Media Moments</p>
+            <span className="version-marker" title={`Build: ${getVersionString()}`}>
+              {getVersionString()}
+            </span>
           </div>
           <div className="header-auth-section">
             {authUser ? (
