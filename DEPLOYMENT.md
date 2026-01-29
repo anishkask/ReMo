@@ -52,18 +52,20 @@ ALLOWED_ORIGINS=https://your-frontend-url.vercel.app,http://localhost:5173,http:
 
 ### Critical Settings
 
-**⚠️ IMPORTANT**: Render defaults to Python 3.13.4, which causes `pydantic-core` to build from source (Rust/Cargo), leading to build failures due to read-only filesystem. The `runtime.txt` file forces Python 3.11.9, which has pre-built wheels for all dependencies.
+**⚠️ IMPORTANT**: Render defaults to Python 3.13.4, which causes `pydantic-core` to build from source (Rust/Cargo), leading to build failures due to read-only filesystem. The `runtime.txt` file at the **repo root** forces Python 3.11.9, which has pre-built wheels for all dependencies.
 
 #### Required Configuration
 
 1. **Root Directory**: `backend`
    - This is the directory Render uses as the service root
-   - Must contain `requirements.txt` and `runtime.txt`
+   - Must contain `requirements.txt`
    - All paths in build/start commands are relative to this directory
 
 2. **Runtime**: `Python 3`
-   - Render will automatically detect and use Python version from `backend/runtime.txt`
-   - The `runtime.txt` file must contain exactly: `python-3.11.9`
+   - **Render reads `runtime.txt` from the repository root** (same level as `backend/` and `frontend/`)
+   - The repo root `runtime.txt` file must contain exactly: `python-3.11.9`
+   - This ensures Render uses Python 3.11.9 instead of the default Python 3.13.4
+   - Note: `backend/runtime.txt` may also exist, but Render prioritizes the repo root version
 
 3. **Build Command**:
    ```bash
@@ -110,69 +112,48 @@ If you encounter build issues or need to force a fresh build:
    - Render will auto-detect and redeploy
    - If Python version doesn't change, clear build cache and redeploy
 
-### Verification Checklist
+### Quick Verification Checklist
 
-After deploying, verify that Render is using Python 3.11 and installing wheels correctly:
+After deploying, check Render build logs to confirm Python 3.11.9 is being used:
 
-#### ✅ Check Python Version in Build Logs
+#### ✅ Look for These Lines (Python 3.11.9):
 
-1. Go to Render Dashboard → Your service → **Logs** tab
-2. Look for the build log section
-3. **Verify**: You should see one of these messages:
-   - `Python 3.11.9` or `python3.11` in the build output
-   - `Using Python version: 3.11.9` or similar
-   - **NOT** `Python 3.13` or `python3.13`
+In Render Dashboard → Your service → **Logs** → Build section, you should see:
+- `Python 3.11.9` or `python3.11` 
+- `Using Python version: 3.11.9`
+- `Downloading pydantic_core-2.14.1-cp311-*.whl` (note the `.whl` extension)
+- `Successfully installed pydantic-core-2.14.1`
 
-#### ✅ Check pydantic-core Installation Method
+#### ❌ These Lines Should NOT Appear:
 
-In the build logs, search for `pydantic-core`:
+If you see any of these, Python 3.13 is being used and the build will fail:
+- `python3.13` or `Python 3.13.4`
+- `Building wheels for pydantic-core`
+- `Building pydantic-core from source`
+- `pydantic_core-*.tar.gz` (tar.gz means source build)
+- `maturin` (Rust build tool)
+- `cargo` (Rust package manager)
+- `error: Read-only file system: '/usr/local/cargo/...'`
 
-1. **✅ CORRECT** - Installing from wheel:
-   ```
-   Collecting pydantic-core==2.14.1
-   Downloading pydantic_core-2.14.1-cp311-*.whl
-   Installing collected packages: pydantic-core
-   Successfully installed pydantic-core-2.14.1
-   ```
-   - Look for `.whl` file extension
-   - Should see "Downloading" not "Building"
+#### Verification Steps:
 
-2. **❌ INCORRECT** - Building from source (will fail):
-   ```
-   Collecting pydantic-core==2.14.1
-   Building wheels for pydantic-core
-   Building pydantic-core from source
-   error: Read-only file system: '/usr/local/cargo/...'
-   ```
-   - If you see "Building wheels" or "Building from source", Python 3.11 is NOT being used
-   - If you see Cargo/Rust errors, Python 3.13 is being used
-
-#### ✅ Verify No Cargo/Rust Errors
-
-The build logs should **NOT** contain:
-- `cargo` commands
-- `maturin` build output
-- `error: Read-only file system` related to `/usr/local/cargo/`
-- Any Rust compilation errors
-
-#### ✅ Successful Build Indicators
-
-A successful build should show:
-- ✅ Python 3.11.9 detected and used
-- ✅ `pydantic-core` downloaded as `.whl` file
-- ✅ All packages install successfully
-- ✅ Application starts without errors
-- ✅ Health endpoint responds: `{"status":"healthy"}`
+1. Go to Render Dashboard → Your service → **Logs**
+2. Scroll to the build section (look for pip install output)
+3. Search for "Python" - should show `3.11.9` not `3.13`
+4. Search for "pydantic-core" - should show `.whl` download, not source build
+5. If you see `python3.13`, `maturin`, `cargo`, or `tar.gz` for pydantic-core, clear build cache and redeploy
 
 ### Troubleshooting Python Version Issues
 
 If Render is still using Python 3.13:
 
-1. **Verify `backend/runtime.txt` exists**:
+1. **Verify repo root `runtime.txt` exists**:
    ```bash
-   cat backend/runtime.txt
+   cat runtime.txt
    # Should output: python-3.11.9
    ```
+   - This file must be at the repository root (same level as `backend/` and `frontend/`)
+   - Render reads from repo root, not from `backend/runtime.txt`
 
 2. **Check Root Directory setting**:
    - Render Dashboard → Service → Settings → **Root Directory** must be `backend`
@@ -183,7 +164,7 @@ If Render is still using Python 3.13:
 
 4. **Check build logs for Python detection**:
    - Look for "Detected Python version" or similar messages
-   - If it says 3.13, the `runtime.txt` is not being read correctly
+   - If it says 3.13, the repo root `runtime.txt` is not being read correctly
 
 ---
 
