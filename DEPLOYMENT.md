@@ -23,8 +23,8 @@ This guide walks you through deploying ReMo to production as a live demo.
    - **Region**: Choose closest to your users
    - **Branch**: `main` (or your default branch)
    - **Root Directory**: `backend`
-   - **Runtime**: `Python 3`
-   - **Build Command**: (leave empty - no build needed)
+   - **Runtime**: `Python 3` (will use Python 3.11.9 from `runtime.txt`)
+   - **Build Command**: `python -m pip install --upgrade pip setuptools wheel && pip install -r requirements.txt`
    - **Start Command**: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
 
 ### 1.2 Set Environment Variables
@@ -42,6 +42,31 @@ ALLOWED_ORIGINS=https://your-frontend-url.vercel.app,http://localhost:5173
 1. Click **"Create Web Service"**
 2. Wait for deployment to complete
 3. Copy the service URL (e.g., `https://remo-backend.onrender.com`)
+
+---
+
+## Render Backend
+
+### Configuration Details
+
+- **Root Directory**: `backend`
+  - Render builds from the `backend/` directory, which contains `requirements.txt` and `runtime.txt`
+  - The `runtime.txt` file specifies Python 3.11.9 to avoid compatibility issues with newer Python versions
+
+- **Build Command**: 
+  ```bash
+  python -m pip install --upgrade pip setuptools wheel && pip install -r requirements.txt
+  ```
+  - Upgrades pip, setuptools, and wheel before installing dependencies
+  - Ensures proper wheel installation for packages like `pydantic-core` (avoids building from source)
+
+- **Start Command**: 
+  ```bash
+  uvicorn app.main:app --host 0.0.0.0 --port $PORT
+  ```
+  - Starts the FastAPI application using uvicorn
+  - Binds to `0.0.0.0` to accept external connections
+  - Uses `$PORT` environment variable provided by Render
 
 ---
 
