@@ -13,7 +13,49 @@ This guide walks you through deploying ReMo to production as a live demo.
 
 ## Step 1: Deploy Backend (Render)
 
-### 1.1 Create New Web Service
+### Option A: Docker Deployment (Recommended)
+
+**Why Docker?** Docker gives full control over Python version, avoiding Render's Python version detection issues. This is the most reliable way to ensure Python 3.11 and prevent pydantic-core source builds.
+
+#### 1.1 Create New Docker Web Service
+
+1. Go to [Render Dashboard](https://dashboard.render.com/)
+2. Click **"New +"** → **"Web Service"**
+3. Connect your GitHub repository
+4. Configure the service:
+   - **Name**: `remo-backend` (or your preferred name)
+   - **Region**: Choose closest to your users
+   - **Branch**: `main` (or your default branch)
+   - **Root Directory**: `backend`
+   - **Environment**: `Docker` ⚠️ **Select Docker, not Python**
+   - **Dockerfile Path**: `backend/Dockerfile` (or leave empty if root directory is `backend`)
+   - **Start Command**: (leave empty - handled by Dockerfile CMD)
+
+#### 1.2 Set Environment Variables
+
+In the Render dashboard, go to **Environment** section and add:
+
+```
+ALLOWED_ORIGINS=https://your-frontend-url.vercel.app,http://localhost:5173,http://localhost:5177
+```
+
+**Note**: Replace `https://your-frontend-url.vercel.app` with your actual frontend URL.
+
+#### 1.3 Deploy
+
+1. Click **"Create Web Service"**
+2. Render will build the Docker image using `backend/Dockerfile`
+3. The Dockerfile uses `python:3.11-slim` base image, ensuring Python 3.11
+4. Wait for deployment to complete
+5. Copy the service URL (e.g., `https://remo-backend.onrender.com`)
+
+---
+
+### Option B: Python Runtime Deployment (Legacy)
+
+**Note**: If `runtime.txt` detection fails, use Docker deployment (Option A) instead.
+
+#### 1.1 Create New Web Service
 
 1. Go to [Render Dashboard](https://dashboard.render.com/)
 2. Click **"New +"** → **"Web Service"**
@@ -48,7 +90,66 @@ ALLOWED_ORIGINS=https://your-frontend-url.vercel.app,http://localhost:5173,http:
 
 ---
 
-## Render Backend Configuration
+## Render Backend (Docker) - Recommended
+
+### Why Docker?
+
+Docker deployment provides **guaranteed Python 3.11** without relying on Render's Python version detection. This completely avoids:
+- Python 3.13.4 default causing pydantic-core source builds
+- `runtime.txt` detection failures
+- Rust/Cargo build errors on read-only filesystem
+
+### Docker Configuration
+
+#### File Structure
+
+Ensure your `backend/` directory contains:
+```
+backend/
+├── Dockerfile           # Docker configuration (uses python:3.11-slim)
+├── .dockerignore       # Files to exclude from Docker build
+├── app/
+│   └── main.py         # FastAPI application
+└── requirements.txt    # Python dependencies
+```
+
+#### Dockerfile Details
+
+The `backend/Dockerfile`:
+- Uses `python:3.11-slim` base image (guarantees Python 3.11)
+- Installs dependencies with pip upgrade (ensures wheel installation)
+- Exposes port 8000
+- Uses `$PORT` environment variable (Render sets this automatically)
+- CMD runs: `uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}`
+
+#### Render Service Settings
+
+- **Service Type**: `Docker` (not Python)
+- **Root Directory**: `backend`
+- **Dockerfile Path**: `backend/Dockerfile` (or empty if root is `backend`)
+- **Start Command**: (leave empty - Dockerfile CMD handles this)
+
+#### Build Process
+
+1. Render clones your repository
+2. Navigates to `backend/` directory (root directory)
+3. Builds Docker image using `Dockerfile`
+4. Dockerfile uses `python:3.11-slim` → Python 3.11 guaranteed
+5. Installs dependencies → `pydantic-core` installs from `.whl` wheels
+6. Starts container → FastAPI app runs on `$PORT`
+
+#### Verification
+
+After deployment, check build logs:
+- ✅ Should see: `FROM python:3.11-slim`
+- ✅ Should see: `Downloading pydantic_core-2.14.1-cp311-*.whl`
+- ✅ Should NOT see: `python3.13`, `maturin`, `cargo`, or source builds
+- ✅ Build completes successfully
+- ✅ Health endpoint responds: `{"status":"healthy"}`
+
+---
+
+## Render Backend Configuration (Python Runtime - Legacy)
 
 ### Critical Settings
 
