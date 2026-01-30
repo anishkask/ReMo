@@ -13,17 +13,22 @@ import os
 import uuid
 import logging
 
+# Configure logging FIRST before any logger calls
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # Import database and models
 from app.db import get_db, check_db_connection, engine
 from app.models import Video, Comment, Base
 
 # Create tables on startup (idempotent - safe to run multiple times)
-Base.metadata.create_all(bind=engine)
-logger.info("Database tables created/verified")
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+try:
+    Base.metadata.create_all(bind=engine)
+    logger.info("Database tables created/verified")
+except Exception as e:
+    logger.error(f"Failed to create database tables: {str(e)}")
+    # Don't crash on startup if DB is temporarily unavailable
+    # This allows the app to start and return helpful errors on API calls
 
 app = FastAPI(
     title="ReMo API",
@@ -186,9 +191,8 @@ async def create_comment(video_id: str, comment: CommentCreate, db: Session = De
         raise HTTPException(status_code=500, detail="Failed to create comment")
 
 
-@app.delete("/videos/{video_id}/comments/{comment_id}")
+@app.delete("/comments/{comment_id}")
 async def delete_comment(
-    video_id: str,
     comment_id: str,
     request: Request,
     db: Session = Depends(get_db)
@@ -200,10 +204,9 @@ async def delete_comment(
     Returns 204 No Content on success.
     """
     try:
-        # Get comment
+        # Get comment (no need for video_id in path since comment.id is unique)
         comment = db.query(Comment).filter(
-            Comment.id == comment_id,
-            Comment.video_id == video_id
+            Comment.id == comment_id
         ).first()
         
         if not comment:
