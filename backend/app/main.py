@@ -13,6 +13,11 @@ from datetime import datetime
 from typing import List, Optional
 import os
 import uuid
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Database setup
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./remo.db")
@@ -70,16 +75,20 @@ app = FastAPI(
 # Configure CORS
 # Allow localhost for development and any deployed frontend URL
 # Ensure localhost:5177 is included for strict port enforcement
+# Production: Set ALLOWED_ORIGINS env var with comma-separated Vercel domains
 allowed_origins_raw = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:5176,http://localhost:5177")
 allowed_origins = [origin.strip() for origin in allowed_origins_raw.split(",") if origin.strip()]
+
+# Log allowed origins (without sensitive data)
+logger.info(f"[CORS] Allowed origins: {', '.join(allowed_origins)}")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"],  # Explicit methods including OPTIONS
-    allow_headers=["*"],
-    expose_headers=["*"],
+    allow_methods=["*"],  # Allow all methods including OPTIONS for preflight
+    allow_headers=["*"],  # Allow all headers
+    expose_headers=["*"],  # Expose all headers
 )
 
 
@@ -272,14 +281,23 @@ class GoogleAuthRequest(BaseModel):
 
 
 @app.post("/auth/google")
-async def auth_google(request_body: GoogleAuthRequest):
+async def auth_google(request_body: GoogleAuthRequest, request: Request):
     """
     Authenticate with Google ID token
     Returns access token and user info
+    CORS middleware handles OPTIONS preflight automatically
     """
+    # Log request origin for debugging
+    origin = request.headers.get("origin", "unknown")
+    logger.info(f"[AUTH] Google OAuth request from origin: {origin}")
+    
     try:
         # Verify the Google ID token
         CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "632365523992-df065eqhlv3kh0io083e1bn6v54ggeee.apps.googleusercontent.com")
+        
+        if not CLIENT_ID:
+            logger.error("[AUTH] GOOGLE_CLIENT_ID not configured")
+            raise HTTPException(status_code=500, detail="Google OAuth not configured")
         
         idinfo = id_token.verify_oauth2_token(
             request_body.id_token,
@@ -303,6 +321,7 @@ async def auth_google(request_body: GoogleAuthRequest):
         import hashlib
         access_token = hashlib.sha256(f"{user_id}{user_email}".encode()).hexdigest()
         
+        logger.info(f"[AUTH] Successfully authenticated user: {user_email}")
         return {
             "access_token": access_token,
             "user": {
@@ -314,6 +333,8 @@ async def auth_google(request_body: GoogleAuthRequest):
         }
     except ValueError as e:
         # Invalid token
+        logger.warning(f"[AUTH] Invalid Google ID token: {str(e)}")
         raise HTTPException(status_code=401, detail=f"Invalid Google ID token: {str(e)}")
     except Exception as e:
+        logger.error(f"[AUTH] Authentication error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Authentication error: {str(e)}")

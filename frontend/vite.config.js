@@ -5,7 +5,7 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   server: {
-    host: 'localhost',
+    host: true, // Allow binding to all network interfaces when needed
     port: 5177,
     strictPort: true, // Enforce port 5177 - fail if port is in use instead of auto-incrementing
   },

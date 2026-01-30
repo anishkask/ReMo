@@ -278,7 +278,7 @@ If Render is still using Python 3.13:
 3. Import your GitHub repository
 4. Configure the project:
    - **Framework Preset**: Vite
-   - **Root Directory**: `frontend`
+   - **Root Directory**: `frontend` ⚠️ **CRITICAL**: Must be exactly `frontend`
    - **Build Command**: `npm run build` (should auto-detect)
    - **Output Directory**: `dist` (should auto-detect)
    - **Install Command**: `npm install` (should auto-detect)
@@ -287,17 +287,171 @@ If Render is still using Python 3.13:
 
 In the Vercel project settings, go to **Environment Variables** and add:
 
+**Required Variables:**
 ```
 VITE_API_BASE_URL=https://your-backend-url.onrender.com
+VITE_GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
 ```
 
-**Note**: Replace `https://your-backend-url.onrender.com` with your actual backend URL from Step 1.
+**Optional (for build version display):**
+```
+VITE_GIT_COMMIT=auto (Vercel sets this automatically)
+VITE_BUILD_TIME=auto (Vercel sets this automatically)
+```
+
+**Note**: 
+- Replace `https://your-backend-url.onrender.com` with your actual backend URL from Step 1
+- Replace `your-google-client-id.apps.googleusercontent.com` with your Google OAuth Client ID
+- Vercel automatically sets `VITE_GIT_COMMIT` and `VITE_BUILD_TIME` during builds
 
 ### 2.3 Deploy
 
 1. Click **"Deploy"**
 2. Wait for deployment to complete
-3. Copy the deployment URL (e.g., `https://remo-demo.vercel.app`)
+3. Copy the deployment URL (e.g., `https://remo-nine.vercel.app` or `https://remo-demo.vercel.app`)
+4. **Verify**: Check the header for build version marker (commit hash or build date)
+
+---
+
+## Deployment Checklist & Configuration
+
+### Vercel Configuration Checklist
+
+#### Project Settings
+- [ ] **Root Directory**: Set to `frontend` (not empty, not `./frontend`)
+- [ ] **Framework Preset**: Vite (auto-detected)
+- [ ] **Build Command**: `npm run build`
+- [ ] **Output Directory**: `dist`
+- [ ] **Install Command**: `npm install`
+
+#### Environment Variables (Vercel)
+- [ ] `VITE_API_BASE_URL` = `https://remo-backend.onrender.com` (your Render backend URL)
+- [ ] `VITE_GOOGLE_CLIENT_ID` = `your-client-id.apps.googleusercontent.com`
+- [ ] Verify variables are set for **Production** environment (and Preview if needed)
+
+#### Verify Deployment
+- [ ] Check build logs show successful build
+- [ ] Visit deployed URL and check browser console for errors
+- [ ] Verify build version marker appears in header (shows commit hash or build date)
+- [ ] Test API connection (backend status should show "Connected")
+
+### Render Configuration Checklist
+
+#### Service Settings (Docker Recommended)
+- [ ] **Service Type**: `Docker` (not Python)
+- [ ] **Root Directory**: `backend`
+- [ ] **Dockerfile Path**: `backend/Dockerfile` (or empty if root is `backend`)
+- [ ] **Start Command**: (leave empty - Dockerfile CMD handles it)
+
+#### Environment Variables (Render)
+- [ ] `ALLOWED_ORIGINS` = `https://remo-nine.vercel.app,http://localhost:5177`
+  - Include ALL Vercel production domains (comma-separated, no spaces)
+  - Include localhost:5177 for local development
+- [ ] `GOOGLE_CLIENT_ID` = `your-client-id.apps.googleusercontent.com` (same as Vercel)
+
+#### Verify Deployment
+- [ ] Check build logs show `FROM python:3.11-slim`
+- [ ] Check build logs show `pydantic-core` installing from `.whl` (not source)
+- [ ] Visit `https://your-backend.onrender.com/health` → should return `{"status":"healthy"}`
+- [ ] Test CORS: Frontend should connect without CORS errors
+
+### Google Cloud Console Configuration
+
+#### OAuth 2.0 Client ID Setup
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
+2. Select your project
+3. Find your OAuth 2.0 Client ID (type: "Web application")
+4. Click **Edit** (pencil icon)
+
+#### Authorized JavaScript Origins
+
+Add **EXACT** origins (no trailing slashes, include `https://`):
+
+**Production:**
+- `https://remo-nine.vercel.app` (or your actual Vercel domain)
+- Add any other Vercel production domains
+
+**Development (optional):**
+- `http://localhost:5177` (for local dev)
+
+**Example:**
+```
+https://remo-nine.vercel.app
+http://localhost:5177
+```
+
+#### Authorized Redirect URIs
+
+For Google Identity Services (One Tap), you typically don't need redirect URIs, but if you add them:
+- `https://remo-nine.vercel.app` (your Vercel domain)
+
+#### Save and Wait
+- [ ] Click **SAVE**
+- [ ] Wait 1-2 minutes for changes to propagate
+- [ ] Hard refresh browser (Ctrl+Shift+R / Cmd+Shift+R)
+
+### Common Failure Modes & Solutions
+
+#### ❌ Wrong Repository Connected
+**Symptoms**: Vercel/Render deploying old code or wrong project
+
+**Solution**:
+- Vercel: Settings → Git → Verify correct repository and branch
+- Render: Settings → Repository → Verify correct repository and branch
+
+#### ❌ Wrong Root Directory
+**Symptoms**: Build fails, "Cannot find package.json" or "Cannot find requirements.txt"
+
+**Solution**:
+- Vercel: Settings → General → Root Directory = `frontend`
+- Render: Settings → Root Directory = `backend`
+
+#### ❌ Old Commit Deployed
+**Symptoms**: Changes not appearing, build version shows old commit hash
+
+**Solution**:
+- Check Vercel/Render → Deployments → Verify latest commit is deployed
+- Trigger manual redeploy: Vercel → Deployments → Redeploy
+- Render → Manual Deploy → Deploy latest commit
+
+#### ❌ Missing Environment Variables
+**Symptoms**: API calls fail, Google OAuth fails, "undefined" in console
+
+**Solution**:
+- Vercel: Settings → Environment Variables → Verify all `VITE_*` variables set
+- Render: Environment → Verify `ALLOWED_ORIGINS` and `GOOGLE_CLIENT_ID` set
+- **Important**: Variables must be set for correct environment (Production/Preview)
+
+#### ❌ CORS Errors (OPTIONS 400)
+**Symptoms**: Browser console shows CORS errors, preflight requests fail
+
+**Solution**:
+- Verify `ALLOWED_ORIGINS` in Render includes exact Vercel domain (with `https://`)
+- Check Render logs for CORS origin logs
+- Ensure FastAPI CORSMiddleware is configured (already done in code)
+- Verify no trailing slashes in origins
+
+#### ❌ Google OAuth "Error 400: origin_mismatch"
+**Symptoms**: Google Sign-In button doesn't appear or shows 403 error
+
+**Solution**:
+- Go to Google Cloud Console → APIs & Services → Credentials
+- Find your OAuth 2.0 Client ID
+- Under "Authorized JavaScript origins", add EXACT Vercel domain:
+  - `https://remo-nine.vercel.app` (no trailing slash)
+- Save and wait 1-2 minutes
+- Hard refresh browser
+- Check browser console for exact origin being used
+
+#### ❌ Build Version Not Showing
+**Symptoms**: No version marker in header, can't verify latest deploy
+
+**Solution**:
+- Vercel automatically sets `VITE_GIT_COMMIT` during builds
+- Check Vercel build logs for commit hash
+- Verify version marker component is rendering (check React DevTools)
+- If still not showing, check browser console for errors
 
 ---
 
