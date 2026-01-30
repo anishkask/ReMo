@@ -269,6 +269,115 @@ If Render is still using Python 3.13:
 
 ---
 
+## Database Setup & Migrations
+
+### Postgres Database (Production)
+
+For persistent comment storage in production, use Render Postgres:
+
+1. **Create Postgres Database**:
+   - Go to Render Dashboard → **New +** → **PostgreSQL**
+   - Name: `remo-db` (or your preferred name)
+   - Plan: Free tier works for demo
+   - Copy the **Internal Database URL** (starts with `postgresql://`)
+
+2. **Set DATABASE_URL Environment Variable**:
+   - Go to your backend service → **Environment**
+   - Add: `DATABASE_URL` = (paste the Internal Database URL from step 1)
+   - **Important**: Use the **Internal Database URL** for Render-to-Render connections
+
+3. **Run Migrations**:
+   - Migrations run automatically on container startup (via Dockerfile CMD)
+   - Alternatively, run manually via Render Shell:
+     ```bash
+     alembic upgrade head
+     ```
+
+### Local Development (SQLite)
+
+For local development, SQLite is used automatically if `DATABASE_URL` is not set:
+- Database file: `backend/remo.db` (created automatically)
+- No migration needed for first run (tables created automatically)
+
+### Running Migrations
+
+#### Local Development
+
+```bash
+cd backend
+
+# Activate virtual environment
+source venv/bin/activate  # Linux/Mac/WSL
+# or: venv\Scripts\activate  # Windows
+
+# Run migrations
+alembic upgrade head
+
+# Create a new migration (after model changes)
+alembic revision --autogenerate -m "description of changes"
+alembic upgrade head
+```
+
+#### Production (Render)
+
+**Option 1: Automatic (Recommended)**
+- Migrations run automatically on container startup via Dockerfile CMD
+- No manual intervention needed
+
+**Option 2: Manual via Render Shell**
+1. Go to Render Dashboard → Your backend service → **Shell**
+2. Run:
+   ```bash
+   alembic upgrade head
+   ```
+
+**Option 3: Release Command (Alternative)**
+- In Render service settings, set **Release Command**: `alembic upgrade head`
+- This runs migrations before each deploy
+- **Note**: Current Dockerfile already includes migrations in CMD
+
+### Migration Commands Reference
+
+```bash
+# Check current migration status
+alembic current
+
+# Show migration history
+alembic history
+
+# Upgrade to latest
+alembic upgrade head
+
+# Downgrade one revision
+alembic downgrade -1
+
+# Create new migration (after model changes)
+alembic revision --autogenerate -m "add new field"
+alembic upgrade head
+```
+
+### Verifying Database Connection
+
+After setting `DATABASE_URL`, check the `/health` endpoint:
+```bash
+curl https://your-backend.onrender.com/health
+```
+
+Should return:
+```json
+{
+  "status": "healthy",
+  "database": "connected"
+}
+```
+
+If `database: "disconnected"`, check:
+- `DATABASE_URL` is set correctly in Render environment variables
+- Postgres database is running
+- Internal Database URL is used (not external URL)
+
+---
+
 ## Step 2: Deploy Frontend (Vercel)
 
 ### 2.1 Create New Project
@@ -556,18 +665,26 @@ To update the deployed app:
 ## Notes
 
 - This is **Demo v1** - the app is actively being iterated upon
-- Backend uses SQLite for persistence (stored in `remo.db` file)
-- **SQLite on Render Free Tier**: SQLite database files are stored on the filesystem, which is ephemeral on Render's free tier. This means:
-  - Data persists during the instance lifetime
-  - Data resets when the service restarts or redeploys
-  - For production with persistent data, upgrade to Render's paid tier with persistent disk, or migrate to Postgres
+- **Comments are now persistent** using Postgres (production) or SQLite (local dev)
+- **SQLite (Local Dev)**: Database file `backend/remo.db` persists locally
+- **Postgres (Production)**: Comments persist across deploys/restarts when `DATABASE_URL` is set
 - Google authentication is supported
 - Videos are loaded from public URLs (no video hosting needed)
+- Database migrations are handled automatically via Alembic
 
-### Database Upgrade Path
+### Comment Persistence Verification Checklist
 
-To migrate from SQLite to Postgres for persistent storage:
-1. Add `psycopg2` or `asyncpg` to `requirements.txt`
-2. Update `db.py` to use Postgres connection string from `DATABASE_URL`
-3. Ensure `DATABASE_URL` is set in Render environment variables
-4. Database schema remains compatible (SQLite and Postgres use similar SQL)
+After deploying with Postgres, verify comments persist:
+
+1. **Post a comment** on a video in production
+2. **Note the comment ID** and content
+3. **Restart the Render service** (or trigger a redeploy)
+4. **Reload the frontend** and navigate to the same video
+5. **Verify**: The comment should still be visible with the same ID and content
+6. **Check database**: Use Render Postgres dashboard to query `SELECT * FROM comments;`
+
+If comments disappear after restart:
+- Verify `DATABASE_URL` is set correctly in Render environment variables
+- Check `/health` endpoint shows `"database": "connected"`
+- Verify migrations ran successfully (check build logs)
+- Check Render Postgres database is running and accessible

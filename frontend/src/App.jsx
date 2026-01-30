@@ -648,40 +648,78 @@ function App() {
         })
         console.log('Comment saved to backend:', savedComment)
         
-        // Use backend comment data
-        const backendComment = {
-          id: savedComment.id,
-          text: savedComment.body,
-          author: savedComment.author_name || authorName,
-          createdAt: savedComment.created_at,
-          timestampSeconds: savedComment.timestamp_seconds || timestampSeconds
-        }
-        
-        // Update state with the saved comment from backend
-        setCommentsByVideoId(prev => {
-          const current = prev[selectedVideoId] || {}
-          const momentComments = current[targetMoment.id] || []
+        // Re-fetch all comments from backend to ensure consistency
+        try {
+          const allComments = await getComments(selectedVideoId)
+          console.log(`Re-fetched ${allComments.length} comments from backend`)
           
-          // Check if comment already exists (avoid duplicates)
-          const existingIndex = momentComments.findIndex(c => c.id === backendComment.id)
-          let updatedMomentComments
-          if (existingIndex >= 0) {
-            updatedMomentComments = [...momentComments]
-            updatedMomentComments[existingIndex] = backendComment
-          } else {
-            updatedMomentComments = [...momentComments, backendComment]
-          }
+          // Get moments for this video
+          const videoMoments = momentsByVideoId[selectedVideoId] || []
           
-          return {
+          // Convert backend comment format to frontend format
+          const convertedComments = allComments.map(comment => ({
+            id: comment.id,
+            text: comment.body,
+            author: comment.author_name || 'Anonymous',
+            createdAt: comment.created_at,
+            timestampSeconds: comment.timestamp_seconds || 0
+          }))
+
+          // Group comments by moment
+          const commentsByMoment = groupCommentsByMoment(
+            convertedComments.map(c => ({
+              id: c.id,
+              timestampSeconds: c.timestampSeconds,
+              timestampLabel: formatSecondsToTimestamp(c.timestampSeconds),
+              text: c.text,
+              displayName: c.author,
+              createdAtISO: c.createdAt
+            })),
+            videoMoments
+          )
+          
+          // Update state with all comments from backend
+          setCommentsByVideoId(prev => ({
             ...prev,
-            [selectedVideoId]: {
-              ...current,
-              [targetMoment.id]: updatedMomentComments
-            }
+            [selectedVideoId]: commentsByMoment
+          }))
+        } catch (fetchError) {
+          console.error('Failed to re-fetch comments:', fetchError)
+          // Fall back to optimistic update if re-fetch fails
+          const backendComment = {
+            id: savedComment.id,
+            text: savedComment.body,
+            author: savedComment.author_name || authorName,
+            createdAt: savedComment.created_at,
+            timestampSeconds: savedComment.timestamp_seconds || timestampSeconds
           }
-        })
+          
+          setCommentsByVideoId(prev => {
+            const current = prev[selectedVideoId] || {}
+            const momentComments = current[targetMoment.id] || []
+            
+            const existingIndex = momentComments.findIndex(c => c.id === backendComment.id)
+            let updatedMomentComments
+            if (existingIndex >= 0) {
+              updatedMomentComments = [...momentComments]
+              updatedMomentComments[existingIndex] = backendComment
+            } else {
+              updatedMomentComments = [...momentComments, backendComment]
+            }
+            
+            return {
+              ...prev,
+              [selectedVideoId]: {
+                ...current,
+                [targetMoment.id]: updatedMomentComments
+              }
+            }
+          })
+        }
       } catch (error) {
         console.error('Failed to save comment to API:', error)
+        // Show error message to user
+        alert(`Failed to save comment: ${error.message || 'Unknown error'}. Please try again.`)
         // Fall back to localStorage for persistence
         const commentId = crypto.randomUUID ? crypto.randomUUID() : `comment-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
         const createdAtISO = new Date().toISOString()

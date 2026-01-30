@@ -3,68 +3,23 @@ ReMo Backend - FastAPI Application Entry Point
 """
 from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from google.auth.transport import requests
 from google.oauth2 import id_token
-from sqlalchemy import create_engine, Column, String, Integer, Float, DateTime, ForeignKey, Text
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session, relationship
+from sqlalchemy.orm import Session
 from datetime import datetime
 from typing import List, Optional
 import os
 import uuid
 import logging
 
+# Import database and models
+from app.db import get_db, check_db_connection
+from app.models import Video, Comment
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# Database setup
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./remo.db")
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {})
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
-
-# Database Models
-class Video(Base):
-    __tablename__ = "videos"
-    
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    owner_id = Column(String, nullable=True)
-    title = Column(String, nullable=False)
-    description = Column(Text, nullable=True)
-    storage_provider = Column(String, nullable=True)  # 's3'|'supabase'|'gcs'|None
-    object_key = Column(String, nullable=True)
-    video_url = Column(String, nullable=False)
-    thumbnail_url = Column(String, nullable=True)
-    duration_seconds = Column(Integer, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    
-    comments = relationship("Comment", back_populates="video", cascade="all, delete-orphan")
-
-class Comment(Base):
-    __tablename__ = "comments"
-    
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    video_id = Column(String, ForeignKey("videos.id"), nullable=False)
-    author_name = Column(String, nullable=True)
-    author_id = Column(String, nullable=True)
-    timestamp_seconds = Column(Float, nullable=False)
-    body = Column(Text, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    
-    video = relationship("Video", back_populates="comments")
-
-# Create tables
-Base.metadata.create_all(bind=engine)
-
-# Dependency to get DB session
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 app = FastAPI(
     title="ReMo API",
@@ -101,7 +56,11 @@ async def root():
 @app.get("/health")
 async def health():
     """Health check endpoint - CORS middleware handles OPTIONS automatically"""
-    return {"status": "healthy"}
+    db_healthy = check_db_connection()
+    return {
+        "status": "healthy",
+        "database": "connected" if db_healthy else "disconnected"
+    }
 
 
 # Pydantic models for request/response
@@ -123,8 +82,15 @@ class VideoResponse(BaseModel):
 class CommentCreate(BaseModel):
     author_name: Optional[str] = None
     author_id: Optional[str] = None
-    timestamp_seconds: float
-    body: str
+    timestamp_seconds: float = Field(ge=0, description="Timestamp in seconds (must be >= 0)")
+    body: str = Field(min_length=1, max_length=5000, description="Comment text (1-5000 characters)")
+    
+    @field_validator('body')
+    @classmethod
+    def validate_body(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError('Comment body cannot be empty')
+        return v.strip()
 
 class CommentResponse(BaseModel):
     id: str
@@ -156,43 +122,64 @@ async def get_video(video_id: str, db: Session = Depends(get_db)):
 
 @app.get("/videos/{video_id}/comments", response_model=List[CommentResponse])
 async def get_comments(video_id: str, db: Session = Depends(get_db)):
-    """Get all comments for a video, ordered by timestamp then created_at"""
-    # Verify video exists
-    video = db.query(Video).filter(Video.id == video_id).first()
-    if not video:
-        raise HTTPException(status_code=404, detail="Video not found")
-    
-    comments = db.query(Comment).filter(
-        Comment.video_id == video_id
-    ).order_by(Comment.timestamp_seconds, Comment.created_at).all()
-    
-    print(f"[BACKEND] GET /videos/{video_id}/comments - Returning {len(comments)} comments")
-    return comments
+    """
+    Get all comments for a video, ordered by created_at ascending.
+    Returns empty list if video has no comments.
+    """
+    try:
+        # Verify video exists
+        video = db.query(Video).filter(Video.id == video_id).first()
+        if not video:
+            raise HTTPException(status_code=404, detail="Video not found")
+        
+        # Get comments ordered by created_at ascending (oldest first)
+        # This matches the API specification: ordered by created_at ascending
+        comments = db.query(Comment).filter(
+            Comment.video_id == video_id
+        ).order_by(Comment.created_at.asc()).all()
+        
+        logger.info(f"[BACKEND] GET /videos/{video_id}/comments - Returning {len(comments)} comments")
+        return comments
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[BACKEND] Error fetching comments for video {video_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to fetch comments")
 
 @app.post("/videos/{video_id}/comments", response_model=CommentResponse)
 async def create_comment(video_id: str, comment: CommentCreate, db: Session = Depends(get_db)):
-    """Create a new comment for a video"""
-    # Verify video exists
-    video = db.query(Video).filter(Video.id == video_id).first()
-    if not video:
-        raise HTTPException(status_code=404, detail="Video not found")
-    
-    print(f"[BACKEND] POST /videos/{video_id}/comments - Creating comment: author={comment.author_name}, timestamp={comment.timestamp_seconds}, body={comment.body[:50]}...")
-    
-    # Create comment
-    db_comment = Comment(
-        video_id=video_id,
-        author_name=comment.author_name,
-        author_id=comment.author_id,
-        timestamp_seconds=comment.timestamp_seconds,
-        body=comment.body
-    )
-    db.add(db_comment)
-    db.commit()
-    db.refresh(db_comment)
-    
-    print(f"[BACKEND] Comment created with ID: {db_comment.id}")
-    return db_comment
+    """
+    Create a new comment for a video.
+    Validates input and persists to database.
+    """
+    try:
+        # Verify video exists
+        video = db.query(Video).filter(Video.id == video_id).first()
+        if not video:
+            raise HTTPException(status_code=404, detail="Video not found")
+        
+        logger.info(f"[BACKEND] POST /videos/{video_id}/comments - Creating comment: author={comment.author_name}, timestamp={comment.timestamp_seconds}, body={comment.body[:50]}...")
+        
+        # Create comment
+        db_comment = Comment(
+            video_id=video_id,
+            author_name=comment.author_name,
+            author_id=comment.author_id,
+            timestamp_seconds=comment.timestamp_seconds,
+            body=comment.body
+        )
+        db.add(db_comment)
+        db.commit()
+        db.refresh(db_comment)
+        
+        logger.info(f"[BACKEND] Comment created with ID: {db_comment.id}")
+        return db_comment
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"[BACKEND] Error creating comment for video {video_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to create comment")
 
 
 # Seed endpoint for development
