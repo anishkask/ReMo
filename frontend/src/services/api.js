@@ -1,14 +1,42 @@
 /**
  * API Client Service for ReMo Backend
+ * 
+ * API base URL handling:
+ * - Production: Use VITE_API_BASE_URL from environment (set in Vercel/Render)
+ * - Development: Fallback to localhost:8000 only if env var is missing
+ * - Never default to localhost in production builds
  */
-// Use 127.0.0.1 instead of localhost for better compatibility
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
+function getApiBaseUrl() {
+  const envUrl = import.meta.env.VITE_API_BASE_URL
+  
+  // If env var is set, use it (production or custom dev)
+  if (envUrl) {
+    return envUrl
+  }
+  
+  // In production build, use same-origin (relative URLs)
+  // This works when frontend and backend are on same domain
+  if (import.meta.env.PROD) {
+    // Return empty string to use relative URLs, or detect from window.location
+    const protocol = window.location.protocol
+    const hostname = window.location.hostname
+    // If on localhost in production (unlikely), still use relative
+    // Otherwise construct from current origin
+    return '' // Use relative URLs in production
+  }
+  
+  // Development fallback: localhost:8000
+  return 'http://127.0.0.1:8000'
+}
+
+const API_BASE_URL = getApiBaseUrl()
 
 /**
  * Generic API request handler
  */
 async function apiRequest(endpoint, options = {}) {
-  const url = `${API_BASE_URL}${endpoint}`;
+  // Handle relative URLs in production (when API_BASE_URL is empty)
+  const url = API_BASE_URL ? `${API_BASE_URL}${endpoint}` : endpoint;
   const config = {
     headers: {
       'Content-Type': 'application/json',
@@ -125,13 +153,17 @@ export async function seedDatabase() {
 
 /**
  * Delete a comment
+ * Uses DELETE /comments/{comment_id} endpoint
  */
-export async function deleteComment(videoId, commentId, userId = null) {
-  const url = `/videos/${videoId}/comments/${commentId}`
+export async function deleteComment(commentId, userId = null) {
+  const url = `/comments/${commentId}`
   // Add user_id as query param for authorization (backend checks if it matches comment.author_id)
   const queryParam = userId ? `?user_id=${encodeURIComponent(userId)}` : ''
   
-  const response = await fetch(`${API_BASE_URL}${url}${queryParam}`, {
+  // Handle relative URLs in production
+  const fullUrl = API_BASE_URL ? `${API_BASE_URL}${url}${queryParam}` : `${url}${queryParam}`
+  
+  const response = await fetch(fullUrl, {
     method: 'DELETE',
     headers: {
       'Content-Type': 'application/json',

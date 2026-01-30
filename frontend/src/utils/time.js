@@ -59,25 +59,19 @@ export function formatCommentTime(isoString) {
     const diffHours = Math.floor(diffMinutes / 60)
     const diffDays = Math.floor(diffHours / 24)
 
-    // If comment is 7 days or older, show absolute date (MM/DD/YY)
-    if (diffDays >= 7) {
-      const month = String(commentDate.getMonth() + 1).padStart(2, '0')
-      const day = String(commentDate.getDate()).padStart(2, '0')
-      const year = String(commentDate.getFullYear()).slice(-2)
-      return `${month}/${day}/${year}`
-    }
-
     // Show relative time for recent comments
-    if (diffSeconds < 10) {
+    if (diffSeconds < 60) {
       return 'now'
-    } else if (diffSeconds < 60) {
-      return `${diffSeconds} sec ago`
     } else if (diffMinutes < 60) {
       return `${diffMinutes} min ago`
     } else if (diffHours < 24) {
       return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`
     } else {
-      return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`
+      // 24+ hours: show absolute date (MM/DD/YY)
+      const month = String(commentDate.getMonth() + 1).padStart(2, '0')
+      const day = String(commentDate.getDate()).padStart(2, '0')
+      const year = String(commentDate.getFullYear()).slice(-2)
+      return `${month}/${day}/${year}`
     }
   } catch (error) {
     console.error('Error formatting comment time:', error)

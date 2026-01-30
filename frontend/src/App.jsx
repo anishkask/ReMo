@@ -777,8 +777,8 @@ function App() {
     }
     
     try {
-      // Delete from backend
-      await deleteCommentAPI(selectedVideoId, commentId, currentUserId)
+      // Delete from backend (new endpoint: DELETE /comments/{comment_id})
+      await deleteCommentAPI(commentId, currentUserId)
       
       // Re-fetch comments to ensure consistency
       const allComments = await getComments(selectedVideoId)
