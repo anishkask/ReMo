@@ -14,8 +14,12 @@ import uuid
 import logging
 
 # Import database and models
-from app.db import get_db, check_db_connection
-from app.models import Video, Comment
+from app.db import get_db, check_db_connection, engine
+from app.models import Video, Comment, Base
+
+# Create tables on startup (idempotent - safe to run multiple times)
+Base.metadata.create_all(bind=engine)
+logger.info("Database tables created/verified")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -132,11 +136,11 @@ async def get_comments(video_id: str, db: Session = Depends(get_db)):
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
         
-        # Get comments ordered by created_at ascending (oldest first)
-        # This matches the API specification: ordered by created_at ascending
+        # Get comments ordered by timestamp_seconds ASC, then created_at ASC
+        # This groups comments by video position, then shows oldest first within each position
         comments = db.query(Comment).filter(
             Comment.video_id == video_id
-        ).order_by(Comment.created_at.asc()).all()
+        ).order_by(Comment.timestamp_seconds.asc(), Comment.created_at.asc()).all()
         
         logger.info(f"[BACKEND] GET /videos/{video_id}/comments - Returning {len(comments)} comments")
         return comments
@@ -172,7 +176,7 @@ async def create_comment(video_id: str, comment: CommentCreate, db: Session = De
         db.commit()
         db.refresh(db_comment)
         
-        logger.info(f"[BACKEND] Comment created with ID: {db_comment.id}")
+        logger.info(f"[BACKEND] Comment created with ID: {db_comment.id}, created_at: {db_comment.created_at}")
         return db_comment
     except HTTPException:
         raise
@@ -180,6 +184,70 @@ async def create_comment(video_id: str, comment: CommentCreate, db: Session = De
         db.rollback()
         logger.error(f"[BACKEND] Error creating comment for video {video_id}: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to create comment")
+
+
+@app.delete("/videos/{video_id}/comments/{comment_id}")
+async def delete_comment(
+    video_id: str,
+    comment_id: str,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    Delete a comment.
+    Authorization: Only the comment author (matching author_id) can delete.
+    For guest comments (author_id is null), deletion is not allowed.
+    Returns 204 No Content on success.
+    """
+    try:
+        # Get comment
+        comment = db.query(Comment).filter(
+            Comment.id == comment_id,
+            Comment.video_id == video_id
+        ).first()
+        
+        if not comment:
+            raise HTTPException(status_code=404, detail="Comment not found")
+        
+        # Get current user ID from query parameter (frontend passes user_id)
+        # In production, this should come from verified JWT token
+        user_id_param = request.query_params.get("user_id")
+        
+        # Check authorization
+        if not comment.author_id:
+            # Guest comment (author_id is null) - don't allow deletion
+            raise HTTPException(
+                status_code=403,
+                detail="Guest comments cannot be deleted"
+            )
+        
+        # Authenticated comment - require matching author_id
+        if not user_id_param:
+            raise HTTPException(
+                status_code=403,
+                detail="Authentication required to delete comments"
+            )
+        
+        if user_id_param != comment.author_id:
+            raise HTTPException(
+                status_code=403,
+                detail="You can only delete your own comments"
+            )
+        
+        # Authorized - delete the comment
+        db.delete(comment)
+        db.commit()
+        
+        logger.info(f"[BACKEND] Comment {comment_id} deleted by user {user_id_param}")
+        # Return 204 No Content
+        from fastapi.responses import Response
+        return Response(status_code=204)
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"[BACKEND] Error deleting comment {comment_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to delete comment")
 
 
 # Seed endpoint for development

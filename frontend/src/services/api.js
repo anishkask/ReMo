@@ -122,3 +122,31 @@ export async function seedDatabase() {
     method: 'POST',
   });
 }
+
+/**
+ * Delete a comment
+ */
+export async function deleteComment(videoId, commentId, userId = null) {
+  const url = `/videos/${videoId}/comments/${commentId}`
+  // Add user_id as query param for authorization (backend checks if it matches comment.author_id)
+  const queryParam = userId ? `?user_id=${encodeURIComponent(userId)}` : ''
+  
+  const response = await fetch(`${API_BASE_URL}${url}${queryParam}`, {
+    method: 'DELETE',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  })
+  
+  if (!response.ok) {
+    if (response.status === 403) {
+      throw new Error('You can only delete your own comments')
+    } else if (response.status === 404) {
+      throw new Error('Comment not found')
+    }
+    throw new Error(`Failed to delete comment: ${response.status} ${response.statusText}`)
+  }
+  
+  // 204 No Content - return success indicator
+  return { success: true }
+}

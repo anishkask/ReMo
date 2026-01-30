@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import './App.css'
-import { checkHealth, getRoot, getMoments, addMoment, authGoogle, getVideos, getComments, postComment, seedDatabase } from './services/api'
+import { checkHealth, getRoot, getMoments, addMoment, authGoogle, getVideos, getComments, postComment, seedDatabase, deleteComment as deleteCommentAPI } from './services/api'
 import VideoPlayer from './components/VideoPlayer'
 import TimelineStrip from './components/TimelineStrip'
 import LiveReactionsFeed from './components/LiveCommentsFeed'
@@ -460,50 +460,26 @@ function App() {
               timestampLabel: formatSecondsToTimestamp(c.timestampSeconds),
               text: c.text,
               displayName: c.author,
-              createdAtISO: c.createdAt
+              createdAtISO: c.createdAt,
+              authorId: c.authorId  // Include author_id for delete authorization
             })),
             videoMoments
           )
 
-          // Merge with existing comments (preserve any localStorage comments for this video)
-          setCommentsByVideoId(prev => {
-            const existingComments = prev[selectedVideoId] || {}
-            const mergedComments = { ...commentsByMoment }
-            
-            // Keep any existing comments that aren't from backend (for backward compatibility)
-            Object.keys(existingComments).forEach(momentId => {
-              const existingMomentComments = existingComments[momentId] || []
-              const backendMomentComments = commentsByMoment[momentId] || []
-              const backendIds = new Set(backendMomentComments.map(c => c.id))
-              const localOnlyComments = existingMomentComments.filter(c => !backendIds.has(c.id))
-              
-              if (localOnlyComments.length > 0) {
-                mergedComments[momentId] = [...backendMomentComments, ...localOnlyComments]
-              } else if (backendMomentComments.length > 0) {
-                mergedComments[momentId] = backendMomentComments
-              } else if (existingMomentComments.length > 0) {
-                mergedComments[momentId] = existingMomentComments
-              }
-            })
-            
-            return {
-              ...prev,
-              [selectedVideoId]: mergedComments
-            }
-          })
+          // For API videos, use ONLY backend comments (no localStorage merge)
+          setCommentsByVideoId(prev => ({
+            ...prev,
+            [selectedVideoId]: commentsByMoment
+          }))
         })
         .catch((error) => {
           console.error('Failed to load comments from backend:', error)
-          // Fall back to localStorage if backend fails
-          const storedComments = loadCommentsForVideo(selectedVideoId)
-          if (storedComments.length > 0) {
-            const videoMoments = momentsByVideoId[selectedVideoId] || []
-            const grouped = groupCommentsByMoment(storedComments, videoMoments)
-            setCommentsByVideoId(prev => ({
-              ...prev,
-              [selectedVideoId]: grouped
-            }))
-          }
+          // For API videos, don't fall back to localStorage - comments must come from backend
+          // Set empty comments to show no comments state
+          setCommentsByVideoId(prev => ({
+            ...prev,
+            [selectedVideoId]: {}
+          }))
         })
     } else {
       // For non-API videos, load from localStorage
@@ -661,6 +637,7 @@ function App() {
             id: comment.id,
             text: comment.body,
             author: comment.author_name || 'Anonymous',
+            authorId: comment.author_id || null,  // Include author_id for delete authorization
             createdAt: comment.created_at,
             timestampSeconds: comment.timestamp_seconds || 0
           }))
@@ -673,12 +650,13 @@ function App() {
               timestampLabel: formatSecondsToTimestamp(c.timestampSeconds),
               text: c.text,
               displayName: c.author,
-              createdAtISO: c.createdAt
+              createdAtISO: c.createdAt,
+              authorId: c.authorId  // Include author_id for delete authorization
             })),
             videoMoments
           )
           
-          // Update state with all comments from backend
+          // Update state with all comments from backend (no localStorage for API videos)
           setCommentsByVideoId(prev => ({
             ...prev,
             [selectedVideoId]: commentsByMoment
@@ -720,35 +698,7 @@ function App() {
         console.error('Failed to save comment to API:', error)
         // Show error message to user
         alert(`Failed to save comment: ${error.message || 'Unknown error'}. Please try again.`)
-        // Fall back to localStorage for persistence
-        const commentId = crypto.randomUUID ? crypto.randomUUID() : `comment-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
-        const createdAtISO = new Date().toISOString()
-        const newComment = {
-          id: commentId,
-          text: commentText.trim(),
-          author: authorName,
-          createdAt: createdAtISO
-        }
-        
-        // Update React state (optimistic update)
-        setCommentsByVideoId(prev => ({
-          ...prev,
-          [selectedVideoId]: {
-            ...(prev[selectedVideoId] || {}),
-            [targetMoment.id]: [...((prev[selectedVideoId] || {})[targetMoment.id] || []), newComment]
-          }
-        }))
-        
-        // Save to localStorage as fallback
-        const commentToStore = {
-          id: commentId,
-          timestampSeconds: timestampSeconds,
-          timestampLabel: timestamp,
-          text: commentText.trim(),
-          displayName: authorName,
-          createdAtISO: createdAtISO
-        }
-        saveComment(selectedVideoId, commentToStore)
+        // Don't save to localStorage - comments must come from backend for API videos
       }
     } else {
       // For non-API videos, save to localStorage
@@ -793,6 +743,76 @@ function App() {
     // Reset video player
     if (videoPlayerRef.current) {
       videoPlayerRef.current.seekTo(0)
+    }
+  }
+
+  const handleDeleteComment = async (commentId, momentId) => {
+    if (!selectedVideoId || !commentId) return
+    
+    const currentVideo = allVideos.find(v => v.id === selectedVideoId)
+    const isApiVideo = currentVideo?.sourceType === 'api'
+    
+    if (!isApiVideo) {
+      // For non-API videos, deletion not supported (localStorage only)
+      return
+    }
+    
+    // Get comment to check authorization
+    const comments = commentsByVideoId[selectedVideoId] || {}
+    const momentComments = comments[momentId] || []
+    const comment = momentComments.find(c => c.id === commentId)
+    
+    if (!comment) return
+    
+    // Check if user can delete (must be authenticated and author_id matches)
+    const currentUserId = authUser?.id || null
+    if (!currentUserId || comment.authorId !== currentUserId) {
+      alert('You can only delete your own comments')
+      return
+    }
+    
+    // Confirm deletion
+    if (!window.confirm('Are you sure you want to delete this comment?')) {
+      return
+    }
+    
+    try {
+      // Delete from backend
+      await deleteCommentAPI(selectedVideoId, commentId, currentUserId)
+      
+      // Re-fetch comments to ensure consistency
+      const allComments = await getComments(selectedVideoId)
+      const videoMoments = momentsByVideoId[selectedVideoId] || []
+      
+      const convertedComments = allComments.map(comment => ({
+        id: comment.id,
+        text: comment.body,
+        author: comment.author_name || 'Anonymous',
+        authorId: comment.author_id || null,
+        createdAt: comment.created_at,
+        timestampSeconds: comment.timestamp_seconds || 0
+      }))
+      
+      const commentsByMoment = groupCommentsByMoment(
+        convertedComments.map(c => ({
+          id: c.id,
+          timestampSeconds: c.timestampSeconds,
+          timestampLabel: formatSecondsToTimestamp(c.timestampSeconds),
+          text: c.text,
+          displayName: c.author,
+          createdAtISO: c.createdAt,
+          authorId: c.authorId
+        })),
+        videoMoments
+      )
+      
+      setCommentsByVideoId(prev => ({
+        ...prev,
+        [selectedVideoId]: commentsByMoment
+      }))
+    } catch (error) {
+      console.error('Failed to delete comment:', error)
+      alert(`Failed to delete comment: ${error.message || 'Unknown error'}`)
     }
   }
 
@@ -1135,6 +1155,8 @@ function App() {
                   moments={moments}
                   commentsByMomentId={commentsByMomentId}
                   currentTime={currentTime}
+                  onDeleteComment={handleDeleteComment}
+                  currentUserId={authUser?.id || null}
                 />
               </div>
               

@@ -11,9 +11,11 @@ function MomentsPanel({
   onTimestampClick, 
   commentsByMomentId, 
   onAddComment,
+  onDeleteComment,
   onSeek,
   displayName,
-  onRequestName
+  onRequestName,
+  currentUserId
 }) {
   const [commentText, setCommentText] = useState('')
   const [userScrolled, setUserScrolled] = useState(false)
@@ -59,9 +61,10 @@ function MomentsPanel({
           timestampLabel,
           momentId,
           commentId: comment.id,
-          author: comment.author,
+          author: comment.author || comment.displayName || 'Anonymous',
+          authorId: comment.authorId || null,
           text: comment.text,
-          createdAt: comment.createdAt,
+          createdAt: comment.createdAt || comment.createdAtISO,
           key: `comment-${comment.id}`
         })
       })
@@ -245,12 +248,22 @@ function MomentsPanel({
             )
           } else {
             // Comment item
+            const canDelete = onDeleteComment && currentUserId && item.authorId === currentUserId
             return (
               <div key={item.key} className="timeline-comment">
                 <div className="comment-header">
                   <span className="comment-author">{item.author}</span>
                   {item.createdAt && (
                     <span className="comment-time">{formatCommentTime(item.createdAt)}</span>
+                  )}
+                  {canDelete && (
+                    <button
+                      className="comment-delete-button"
+                      onClick={() => onDeleteComment(item.commentId, item.momentId)}
+                      title="Delete comment"
+                    >
+                      ×
+                    </button>
                   )}
                 </div>
                 <div className="comment-text">{item.text}</div>

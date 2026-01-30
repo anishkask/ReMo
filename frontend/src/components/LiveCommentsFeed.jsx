@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { formatCommentTime, parseTimestampToSeconds } from '../utils/time'
 
-function LiveReactionsFeed({ moments, commentsByMomentId, currentTime }) {
+function LiveReactionsFeed({ moments, commentsByMomentId, currentTime, onDeleteComment, currentUserId }) {
   const feedRef = useRef(null)
   const [userScrolled, setUserScrolled] = useState(false)
   const lastScrollHeightRef = useRef(0)
@@ -18,7 +18,8 @@ function LiveReactionsFeed({ moments, commentsByMomentId, currentTime }) {
         allComments.push({
           ...comment,
           momentTimestamp: moment.timestamp,
-          momentSeconds: momentSeconds
+          momentSeconds: momentSeconds,
+          authorId: comment.authorId || null  // Preserve authorId for delete check
         })
       })
     })
@@ -74,27 +75,45 @@ function LiveReactionsFeed({ moments, commentsByMomentId, currentTime }) {
             <p>Comments will appear here as the video plays...</p>
           </div>
         ) : (
-          visibleComments.map((comment) => (
-            <div key={comment.id} className="reaction-comment-item">
-              <div className="reaction-comment-avatar">
-                {comment.author ? comment.author.charAt(0).toUpperCase() : '?'}
-              </div>
-              <div className="reaction-comment-content">
-                <div className="reaction-comment-header">
-                  <span className="reaction-comment-author">{comment.author || 'Anonymous'}</span>
-                  {comment.createdAt && (
-                    <span className="reaction-comment-relative-time">
-                      {formatCommentTime(comment.createdAt)}
-                    </span>
-                  )}
+          visibleComments.map((comment) => {
+            const canDelete = onDeleteComment && currentUserId && comment.authorId === currentUserId
+            return (
+              <div key={comment.id} className="reaction-comment-item">
+                <div className="reaction-comment-avatar">
+                  {comment.author ? comment.author.charAt(0).toUpperCase() : '?'}
                 </div>
-                <div className="reaction-comment-text">{comment.text}</div>
+                <div className="reaction-comment-content">
+                  <div className="reaction-comment-header">
+                    <span className="reaction-comment-author">{comment.author || 'Anonymous'}</span>
+                    {comment.createdAt && (
+                      <span className="reaction-comment-relative-time">
+                        {formatCommentTime(comment.createdAt)}
+                      </span>
+                    )}
+                    {canDelete && (
+                      <button
+                        className="reaction-comment-delete-button"
+                        onClick={() => {
+                          // Find moment ID for this comment
+                          const moment = moments.find(m => m.timestamp === comment.momentTimestamp)
+                          if (moment && onDeleteComment) {
+                            onDeleteComment(comment.id, moment.id)
+                          }
+                        }}
+                        title="Delete comment"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                  <div className="reaction-comment-text">{comment.text}</div>
+                </div>
+                <div className="reaction-comment-timestamp">
+                  {comment.momentTimestamp}
+                </div>
               </div>
-              <div className="reaction-comment-timestamp">
-                {comment.momentTimestamp}
-              </div>
-            </div>
-          ))
+            )
+          })
         )}
       </div>
     </div>

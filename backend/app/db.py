@@ -13,6 +13,11 @@ logger = logging.getLogger(__name__)
 # Get DATABASE_URL from environment, default to SQLite for local dev
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./remo.db")
 
+# Convert postgres:// to postgresql+psycopg2:// (Render sometimes provides postgres://)
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg2://", 1)
+    logger.info("Converted postgres:// to postgresql+psycopg2://")
+
 # Configure engine with appropriate connect args
 if "sqlite" in DATABASE_URL:
     # SQLite-specific configuration

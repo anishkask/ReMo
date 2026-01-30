@@ -36,8 +36,8 @@ export function formatSecondsToTimestamp(seconds) {
 
 /**
  * Format comment timestamp as relative time or absolute date
- * @param {string} isoString - ISO date string
- * @returns {string} - Formatted time string
+ * @param {string} isoString - ISO date string from backend
+ * @returns {string} - Formatted time string (e.g., "now", "10 min ago", "5 hours ago", "01/15/24")
  */
 export function formatCommentTime(isoString) {
   if (!isoString || typeof isoString !== 'string') {
@@ -47,34 +47,37 @@ export function formatCommentTime(isoString) {
   try {
     const commentDate = new Date(isoString)
     const now = new Date()
-    const diffMs = now - commentDate
-    const diffDays = diffMs / (1000 * 60 * 60 * 24)
-
-    // If comment is 7 days or older, show absolute date
-    if (diffDays >= 7) {
-      return new Intl.DateTimeFormat('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric'
-      }).format(commentDate)
+    const diffMs = now.getTime() - commentDate.getTime()
+    
+    // Handle invalid dates
+    if (isNaN(diffMs) || diffMs < 0) {
+      return ''
     }
-
-    // Otherwise, show relative time
-    const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' })
     
     const diffSeconds = Math.floor(diffMs / 1000)
     const diffMinutes = Math.floor(diffSeconds / 60)
     const diffHours = Math.floor(diffMinutes / 60)
-    const diffDaysRounded = Math.floor(diffDays)
+    const diffDays = Math.floor(diffHours / 24)
 
-    if (diffSeconds < 60) {
-      return rtf.format(-diffSeconds, 'second')
+    // If comment is 7 days or older, show absolute date (MM/DD/YY)
+    if (diffDays >= 7) {
+      const month = String(commentDate.getMonth() + 1).padStart(2, '0')
+      const day = String(commentDate.getDate()).padStart(2, '0')
+      const year = String(commentDate.getFullYear()).slice(-2)
+      return `${month}/${day}/${year}`
+    }
+
+    // Show relative time for recent comments
+    if (diffSeconds < 10) {
+      return 'now'
+    } else if (diffSeconds < 60) {
+      return `${diffSeconds} sec ago`
     } else if (diffMinutes < 60) {
-      return rtf.format(-diffMinutes, 'minute')
+      return `${diffMinutes} min ago`
     } else if (diffHours < 24) {
-      return rtf.format(-diffHours, 'hour')
+      return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`
     } else {
-      return rtf.format(-diffDaysRounded, 'day')
+      return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`
     }
   } catch (error) {
     console.error('Error formatting comment time:', error)
