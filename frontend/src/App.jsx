@@ -714,7 +714,6 @@ function App() {
           console.error('Failed to re-fetch comments after post:', fetchError)
           // Optimistic update already applied, so UI is correct
         }
-        }
       } catch (error) {
         console.error('Failed to save comment to API:', error)
         // Show error message to user
