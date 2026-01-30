@@ -61,7 +61,7 @@ export function formatCommentTime(isoString) {
 
     // Show relative time for recent comments
     if (diffSeconds < 60) {
-      return 'now'
+      return 'just now'
     } else if (diffMinutes < 60) {
       return `${diffMinutes} min ago`
     } else if (diffHours < 24) {

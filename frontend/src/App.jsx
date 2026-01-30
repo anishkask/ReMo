@@ -427,73 +427,121 @@ function App() {
     }
   }, [apiStatus, importedVideos, customVideos, apiVideos])
 
-  // Load comments from backend when video is selected (for API videos)
-  useEffect(() => {
-    if (!selectedVideoId || apiStatus !== 'connected') return
-
-    const currentVideo = allVideos.find(v => v.id === selectedVideoId)
+  // Helper function to fetch and process comments for a video
+  const fetchCommentsForVideo = async (videoId, abortSignal = null) => {
+    const currentVideo = allVideos.find(v => v.id === videoId)
     const isApiVideo = currentVideo?.sourceType === 'api'
 
-    if (isApiVideo) {
-      // Fetch comments from backend
-      getComments(selectedVideoId)
-        .then((backendComments) => {
-          console.log(`Loaded ${backendComments.length} comments from backend for video ${selectedVideoId}`)
-          
-          // Get moments for this video
-          const videoMoments = momentsByVideoId[selectedVideoId] || []
-          
-          // Convert backend comment format to frontend format
-          const convertedComments = backendComments.map(comment => ({
-            id: comment.id,
-            text: comment.body,
-            author: comment.author_name || 'Anonymous',
-            createdAt: comment.created_at,
-            timestampSeconds: comment.timestamp_seconds || 0
-          }))
+    if (isApiVideo && apiStatus === 'connected') {
+      try {
+        console.log('Fetching comments for', videoId)
+        const backendComments = await getComments(videoId)
+        console.log(`Loaded ${backendComments.length} comments from backend for video ${videoId}`)
+        
+        // Get moments for this video (read from current state, not dependency)
+        const videoMoments = momentsByVideoId[videoId] || []
+        
+        // Convert backend comment format to frontend format
+        const convertedComments = backendComments.map(comment => ({
+          id: comment.id,
+          text: comment.body,
+          author: comment.author_name || 'Anonymous',
+          authorId: comment.author_id || null,
+          createdAt: comment.created_at,
+          timestampSeconds: comment.timestamp_seconds || 0
+        }))
 
-          // Group comments by moment
-          const commentsByMoment = groupCommentsByMoment(
-            convertedComments.map(c => ({
-              id: c.id,
-              timestampSeconds: c.timestampSeconds,
-              timestampLabel: formatSecondsToTimestamp(c.timestampSeconds),
-              text: c.text,
-              displayName: c.author,
-              createdAtISO: c.createdAt,
-              authorId: c.authorId  // Include author_id for delete authorization
-            })),
-            videoMoments
-          )
+        // Group comments by moment
+        const commentsByMoment = groupCommentsByMoment(
+          convertedComments.map(c => ({
+            id: c.id,
+            timestampSeconds: c.timestampSeconds,
+            timestampLabel: formatSecondsToTimestamp(c.timestampSeconds),
+            text: c.text,
+            displayName: c.author,
+            createdAtISO: c.createdAt,
+            authorId: c.authorId
+          })),
+          videoMoments
+        )
 
-          // For API videos, use ONLY backend comments (no localStorage merge)
+        // Update state only if not aborted
+        if (!abortSignal?.aborted) {
           setCommentsByVideoId(prev => ({
             ...prev,
-            [selectedVideoId]: commentsByMoment
+            [videoId]: commentsByMoment
           }))
-        })
-        .catch((error) => {
-          console.error('Failed to load comments from backend:', error)
-          // For API videos, don't fall back to localStorage - comments must come from backend
-          // Set empty comments to show no comments state
-          setCommentsByVideoId(prev => ({
-            ...prev,
-            [selectedVideoId]: {}
-          }))
-        })
-    } else {
+        }
+      } catch (error) {
+        if (abortSignal?.aborted) {
+          console.log('Comment fetch cancelled for', videoId)
+          return
+        }
+        console.error('Failed to load comments from backend:', error)
+        // For API videos, don't fall back to localStorage - comments must come from backend
+        // Set empty comments to show no comments state
+        setCommentsByVideoId(prev => ({
+          ...prev,
+          [videoId]: {}
+        }))
+      }
+    } else if (!isApiVideo) {
       // For non-API videos, load from localStorage
-      const storedComments = loadCommentsForVideo(selectedVideoId)
+      const storedComments = loadCommentsForVideo(videoId)
       if (storedComments.length > 0) {
-        const videoMoments = momentsByVideoId[selectedVideoId] || []
+        const videoMoments = momentsByVideoId[videoId] || []
         const grouped = groupCommentsByMoment(storedComments, videoMoments)
         setCommentsByVideoId(prev => ({
           ...prev,
-          [selectedVideoId]: grouped
+          [videoId]: grouped
         }))
       }
     }
-  }, [selectedVideoId, apiStatus, momentsByVideoId, allVideos])
+  }
+
+  // Ref to track in-flight comment fetch to prevent overlapping requests
+  const commentsFetchRef = useRef(null)
+
+  // Load comments from backend when video is selected (for API videos)
+  // CRITICAL: Only depend on videoId and apiStatus - NOT on momentsByVideoId or allVideos
+  useEffect(() => {
+    if (!selectedVideoId || apiStatus !== 'connected') return
+
+    // AbortController to cancel in-flight requests
+    const abortController = new AbortController()
+    commentsFetchRef.current = abortController
+
+    const loadComments = async () => {
+      // Guard: if there's already a fetch in progress for a different video, abort it
+      if (commentsFetchRef.current && commentsFetchRef.current !== abortController) {
+        commentsFetchRef.current.abort()
+      }
+
+      try {
+        await fetchCommentsForVideo(selectedVideoId, abortController.signal)
+      } catch (error) {
+        // Ignore abort errors
+        if (error.name !== 'AbortError' && !abortController.signal.aborted) {
+          console.error('Error loading comments:', error)
+        }
+      } finally {
+        // Clear ref if this is still the current fetch
+        if (commentsFetchRef.current === abortController) {
+          commentsFetchRef.current = null
+        }
+      }
+    }
+
+    loadComments()
+
+    // Cleanup: abort request if videoId changes or component unmounts
+    return () => {
+      abortController.abort()
+      if (commentsFetchRef.current === abortController) {
+        commentsFetchRef.current = null
+      }
+    }
+  }, [selectedVideoId, apiStatus]) // ONLY these two dependencies
 
   const handleTimeUpdate = (time) => {
     setCurrentTime(time)
@@ -624,75 +672,48 @@ function App() {
         })
         console.log('Comment saved to backend:', savedComment)
         
-        // Re-fetch all comments from backend to ensure consistency
-        try {
-          const allComments = await getComments(selectedVideoId)
-          console.log(`Re-fetched ${allComments.length} comments from backend`)
+        // Optimistically add comment to UI immediately
+        const optimisticComment = {
+          id: savedComment.id,
+          text: savedComment.body,
+          author: savedComment.author_name || authorName,
+          authorId: savedComment.author_id || null,
+          createdAt: savedComment.created_at,
+          timestampSeconds: savedComment.timestamp_seconds || timestampSeconds
+        }
+        
+        // Update state optimistically
+        setCommentsByVideoId(prev => {
+          const current = prev[selectedVideoId] || {}
+          const momentComments = current[targetMoment.id] || []
           
-          // Get moments for this video
-          const videoMoments = momentsByVideoId[selectedVideoId] || []
-          
-          // Convert backend comment format to frontend format
-          const convertedComments = allComments.map(comment => ({
-            id: comment.id,
-            text: comment.body,
-            author: comment.author_name || 'Anonymous',
-            authorId: comment.author_id || null,  // Include author_id for delete authorization
-            createdAt: comment.created_at,
-            timestampSeconds: comment.timestamp_seconds || 0
-          }))
-
-          // Group comments by moment
-          const commentsByMoment = groupCommentsByMoment(
-            convertedComments.map(c => ({
-              id: c.id,
-              timestampSeconds: c.timestampSeconds,
-              timestampLabel: formatSecondsToTimestamp(c.timestampSeconds),
-              text: c.text,
-              displayName: c.author,
-              createdAtISO: c.createdAt,
-              authorId: c.authorId  // Include author_id for delete authorization
-            })),
-            videoMoments
-          )
-          
-          // Update state with all comments from backend (no localStorage for API videos)
-          setCommentsByVideoId(prev => ({
-            ...prev,
-            [selectedVideoId]: commentsByMoment
-          }))
-        } catch (fetchError) {
-          console.error('Failed to re-fetch comments:', fetchError)
-          // Fall back to optimistic update if re-fetch fails
-          const backendComment = {
-            id: savedComment.id,
-            text: savedComment.body,
-            author: savedComment.author_name || authorName,
-            createdAt: savedComment.created_at,
-            timestampSeconds: savedComment.timestamp_seconds || timestampSeconds
+          // Check if comment already exists (avoid duplicates)
+          const existingIndex = momentComments.findIndex(c => c.id === optimisticComment.id)
+          let updatedMomentComments
+          if (existingIndex >= 0) {
+            updatedMomentComments = [...momentComments]
+            updatedMomentComments[existingIndex] = optimisticComment
+          } else {
+            updatedMomentComments = [...momentComments, optimisticComment]
           }
           
-          setCommentsByVideoId(prev => {
-            const current = prev[selectedVideoId] || {}
-            const momentComments = current[targetMoment.id] || []
-            
-            const existingIndex = momentComments.findIndex(c => c.id === backendComment.id)
-            let updatedMomentComments
-            if (existingIndex >= 0) {
-              updatedMomentComments = [...momentComments]
-              updatedMomentComments[existingIndex] = backendComment
-            } else {
-              updatedMomentComments = [...momentComments, backendComment]
+          return {
+            ...prev,
+            [selectedVideoId]: {
+              ...current,
+              [targetMoment.id]: updatedMomentComments
             }
-            
-            return {
-              ...prev,
-              [selectedVideoId]: {
-                ...current,
-                [targetMoment.id]: updatedMomentComments
-              }
-            }
-          })
+          }
+        })
+        
+        // Re-fetch all comments from backend to ensure consistency
+        // Call fetchCommentsForVideo directly (no useEffect trigger)
+        try {
+          await fetchCommentsForVideo(selectedVideoId)
+        } catch (fetchError) {
+          console.error('Failed to re-fetch comments after post:', fetchError)
+          // Optimistic update already applied, so UI is correct
+        }
         }
       } catch (error) {
         console.error('Failed to save comment to API:', error)
@@ -781,35 +802,8 @@ function App() {
       await deleteCommentAPI(commentId, currentUserId)
       
       // Re-fetch comments to ensure consistency
-      const allComments = await getComments(selectedVideoId)
-      const videoMoments = momentsByVideoId[selectedVideoId] || []
-      
-      const convertedComments = allComments.map(comment => ({
-        id: comment.id,
-        text: comment.body,
-        author: comment.author_name || 'Anonymous',
-        authorId: comment.author_id || null,
-        createdAt: comment.created_at,
-        timestampSeconds: comment.timestamp_seconds || 0
-      }))
-      
-      const commentsByMoment = groupCommentsByMoment(
-        convertedComments.map(c => ({
-          id: c.id,
-          timestampSeconds: c.timestampSeconds,
-          timestampLabel: formatSecondsToTimestamp(c.timestampSeconds),
-          text: c.text,
-          displayName: c.author,
-          createdAtISO: c.createdAt,
-          authorId: c.authorId
-        })),
-        videoMoments
-      )
-      
-      setCommentsByVideoId(prev => ({
-        ...prev,
-        [selectedVideoId]: commentsByMoment
-      }))
+      // Call fetchCommentsForVideo directly (no useEffect trigger)
+      await fetchCommentsForVideo(selectedVideoId)
     } catch (error) {
       console.error('Failed to delete comment:', error)
       alert(`Failed to delete comment: ${error.message || 'Unknown error'}`)

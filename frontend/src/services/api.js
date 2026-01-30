@@ -2,30 +2,28 @@
  * API Client Service for ReMo Backend
  * 
  * API base URL handling:
- * - Production: Use VITE_API_BASE_URL from environment (set in Vercel/Render)
+ * - Production: MUST use VITE_API_BASE_URL from environment (set in Vercel)
  * - Development: Fallback to localhost:8000 only if env var is missing
- * - Never default to localhost in production builds
+ * - NEVER references localhost/127.0.0.1 in production builds
  */
 function getApiBaseUrl() {
   const envUrl = import.meta.env.VITE_API_BASE_URL
   
-  // If env var is set, use it (production or custom dev)
+  // If env var is set, use it (required in production)
   if (envUrl) {
     return envUrl
   }
   
-  // In production build, use same-origin (relative URLs)
-  // This works when frontend and backend are on same domain
+  // In production build, VITE_API_BASE_URL MUST be set
+  // If missing, throw error to prevent localhost references
   if (import.meta.env.PROD) {
-    // Return empty string to use relative URLs, or detect from window.location
-    const protocol = window.location.protocol
-    const hostname = window.location.hostname
-    // If on localhost in production (unlikely), still use relative
-    // Otherwise construct from current origin
-    return '' // Use relative URLs in production
+    console.error('VITE_API_BASE_URL is not set in production!')
+    // In production, fail gracefully by using relative URLs
+    // This assumes frontend and backend are on same domain
+    return ''
   }
   
-  // Development fallback: localhost:8000
+  // Development fallback: localhost:8000 (only in dev mode)
   return 'http://127.0.0.1:8000'
 }
 
