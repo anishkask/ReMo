@@ -410,6 +410,7 @@
   max-width: 400px;
   width: 90%;
   position: relative;
+  animation: slideIn 0.3s ease-out;
 }
 
 .display-name-prompt-close {
@@ -435,8 +436,6 @@
 .display-name-prompt-close:hover {
   background: rgba(79, 195, 247, 0.1);
   color: #0277BD;
-}
-  animation: slideIn 0.3s ease-out;
 }
 
 @keyframes slideIn {
