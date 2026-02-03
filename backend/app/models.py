@@ -4,7 +4,7 @@ SQLAlchemy models for ReMo database
 from sqlalchemy import Column, String, Integer, Float, DateTime, ForeignKey, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 
 Base = declarative_base()
@@ -23,7 +23,7 @@ class Video(Base):
     video_url = Column(String, nullable=False)
     thumbnail_url = Column(String, nullable=True)
     duration_seconds = Column(Integer, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     
     # Relationship to comments
     comments = relationship("Comment", back_populates="video", cascade="all, delete-orphan")
@@ -39,7 +39,7 @@ class Comment(Base):
     author_id = Column(String, nullable=True)
     timestamp_seconds = Column(Float, nullable=False)
     body = Column(Text, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     
     # Relationship to video
     video = relationship("Video", back_populates="comments")

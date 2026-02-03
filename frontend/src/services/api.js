@@ -151,10 +151,10 @@ export async function seedDatabase() {
 
 /**
  * Delete a comment
- * Uses DELETE /comments/{comment_id} endpoint
+ * Uses DELETE /videos/{video_id}/comments/{comment_id} endpoint
  */
-export async function deleteComment(commentId, userId = null) {
-  const url = `/comments/${commentId}`
+export async function deleteComment(videoId, commentId, userId = null) {
+  const url = `/videos/${videoId}/comments/${commentId}`
   // Add user_id as query param for authorization (backend checks if it matches comment.author_id)
   const queryParam = userId ? `?user_id=${encodeURIComponent(userId)}` : ''
   

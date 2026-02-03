@@ -61,13 +61,15 @@ export function formatCommentTime(isoString) {
 
     // Show relative time for recent comments
     if (diffSeconds < 60) {
-      return 'just now'
+      return 'now'
     } else if (diffMinutes < 60) {
       return `${diffMinutes} min ago`
     } else if (diffHours < 24) {
       return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`
+    } else if (diffDays < 7) {
+      return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`
     } else {
-      // 24+ hours: show absolute date (MM/DD/YY)
+      // 7+ days: show absolute date (MM/DD/YY)
       const month = String(commentDate.getMonth() + 1).padStart(2, '0')
       const day = String(commentDate.getDate()).padStart(2, '0')
       const year = String(commentDate.getFullYear()).slice(-2)

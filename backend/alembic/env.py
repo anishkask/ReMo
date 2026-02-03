@@ -15,6 +15,10 @@ import os
 # Get DATABASE_URL from environment (same logic as app.db)
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./remo.db")
 
+# Convert postgres:// to postgresql+psycopg2:// (Render compatibility)
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg2://", 1)
+
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config

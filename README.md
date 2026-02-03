@@ -23,7 +23,7 @@ structure, clean commits, and a polished MVP suitable for recruiter demos.
 - Backend: FastAPI (Python)
 - Dev environment: WSL (Ubuntu) + VS Code / Cursor
 - Backend port: 8000
-- Frontend port: 5173
+- Frontend port: 5177 (strict)
 
 ---
 

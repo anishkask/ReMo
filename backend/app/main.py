@@ -191,8 +191,9 @@ async def create_comment(video_id: str, comment: CommentCreate, db: Session = De
         raise HTTPException(status_code=500, detail="Failed to create comment")
 
 
-@app.delete("/comments/{comment_id}")
+@app.delete("/videos/{video_id}/comments/{comment_id}")
 async def delete_comment(
+    video_id: str,
     comment_id: str,
     request: Request,
     db: Session = Depends(get_db)
@@ -204,9 +205,10 @@ async def delete_comment(
     Returns 204 No Content on success.
     """
     try:
-        # Get comment (no need for video_id in path since comment.id is unique)
+        # Get comment and verify it belongs to the video
         comment = db.query(Comment).filter(
-            Comment.id == comment_id
+            Comment.id == comment_id,
+            Comment.video_id == video_id
         ).first()
         
         if not comment:
