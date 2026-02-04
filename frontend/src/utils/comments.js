@@ -84,12 +84,13 @@ export function groupCommentsByMoment(comments, moments) {
         grouped[momentId] = []
       }
       
-      // Convert to app format: { id, text, author, createdAt }
+      // Convert to app format: { id, text, author, authorId, createdAt }
       grouped[momentId].push({
         id: comment.id,
         text: comment.text,
         author: comment.displayName,
-        createdAt: comment.createdAtISO
+        authorId: comment.authorId || null,  // Preserve authorId for delete functionality
+        createdAt: comment.createdAtISO || comment.createdAt || null
       })
     }
   })

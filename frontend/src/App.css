@@ -2403,6 +2403,58 @@
   overflow: hidden;
 }
 
+.live-reactions-feed .feed-header {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid rgba(79, 195, 247, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+
+.feed-header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.comments-count {
+  font-size: 0.85rem;
+  color: rgba(255, 251, 240, 0.8);
+  font-weight: 500;
+}
+
+.comments-loading {
+  font-size: 0.85rem;
+  color: rgba(79, 195, 247, 0.8);
+  font-style: italic;
+}
+
+.show-all-comments-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: rgba(255, 251, 240, 0.8);
+  user-select: none;
+}
+
+.show-all-comments-toggle:hover {
+  color: rgba(255, 251, 240, 1);
+}
+
+.show-all-comments-toggle input[type="checkbox"] {
+  cursor: pointer;
+  width: 16px;
+  height: 16px;
+  accent-color: #4FC3F7;
+}
+
+.show-all-comments-toggle span {
+  font-size: 0.85rem;
+}
+
 .live-reactions-feed .feed-container {
   flex: 1;
   overflow-y: auto;
@@ -2454,6 +2506,11 @@
   border-left: 2px solid rgba(79, 195, 247, 0.3);
   transition: all 0.2s;
   animation: slideIn 0.3s ease-out;
+}
+
+.reaction-comment-item.comment-active {
+  background: rgba(79, 195, 247, 0.1);
+  border-left-color: rgba(79, 195, 247, 0.6);
 }
 
 .reaction-comment-item:hover {

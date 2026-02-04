@@ -30,6 +30,8 @@ function App() {
   const [selectedMoment, setSelectedMoment] = useState(null)
   const [followLive, setFollowLive] = useState(true)
   const [commentsByVideoId, setCommentsByVideoId] = useState({})
+  const [commentsLoading, setCommentsLoading] = useState(false)
+  const [showAllComments, setShowAllComments] = useState(true)  // Default to showing all comments
   const [displayName, setDisplayName] = useState('')
   const [showNamePrompt, setShowNamePrompt] = useState(false)
   const [authUser, setAuthUser] = useState(null) // Google auth user
@@ -434,6 +436,7 @@ function App() {
 
     if (isApiVideo && apiStatus === 'connected') {
       try {
+        setCommentsLoading(true)
         console.log('Fetching comments for', videoId)
         const backendComments = await getComments(videoId)
         console.log(`Loaded ${backendComments.length} comments from backend for video ${videoId}`)
@@ -471,6 +474,7 @@ function App() {
             ...prev,
             [videoId]: commentsByMoment
           }))
+          setCommentsLoading(false)
         }
       } catch (error) {
         if (abortSignal?.aborted) {
@@ -478,6 +482,7 @@ function App() {
           return
         }
         console.error('Failed to load comments from backend:', error)
+        setCommentsLoading(false)
         // For API videos, don't fall back to localStorage - comments must come from backend
         // Set empty comments to show no comments state
         setCommentsByVideoId(prev => ({
@@ -1150,6 +1155,9 @@ function App() {
                   currentTime={currentTime}
                   onDeleteComment={handleDeleteComment}
                   currentUserId={authUser?.id || null}
+                  showAllComments={showAllComments}
+                  onToggleShowAll={setShowAllComments}
+                  isLoading={commentsLoading}
                 />
               </div>
               

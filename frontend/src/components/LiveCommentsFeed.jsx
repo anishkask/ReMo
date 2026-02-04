@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { formatCommentTime, parseTimestampToSeconds } from '../utils/time'
 
-function LiveReactionsFeed({ moments, commentsByMomentId, currentTime, onDeleteComment, currentUserId }) {
+function LiveReactionsFeed({ moments, commentsByMomentId, currentTime, onDeleteComment, currentUserId, showAllComments = true, onToggleShowAll, isLoading = false }) {
   const feedRef = useRef(null)
   const [userScrolled, setUserScrolled] = useState(false)
   const lastScrollHeightRef = useRef(0)
@@ -19,16 +19,31 @@ function LiveReactionsFeed({ moments, commentsByMomentId, currentTime, onDeleteC
           ...comment,
           momentTimestamp: moment.timestamp,
           momentSeconds: momentSeconds,
-          authorId: comment.authorId || null  // Preserve authorId for delete check
+          authorId: comment.authorId || null,  // Preserve authorId for delete check
+          createdAt: comment.createdAt || comment.createdAtISO || null  // Support both field names
         })
       })
     })
   }
 
-  // Filter comments where timestampSeconds <= currentTime
+  // Filter comments based on showAllComments toggle
+  // When showAllComments is true, show all comments regardless of currentTime
+  // When false, only show comments where timestampSeconds <= currentTime (live mode)
   const visibleComments = allComments
-    .filter(comment => comment.momentSeconds <= currentTime)
-    .sort((a, b) => a.momentSeconds - b.momentSeconds)
+    .filter(comment => showAllComments || comment.momentSeconds <= currentTime)
+    .sort((a, b) => {
+      // Sort by timestamp_seconds first, then by created_at
+      if (a.momentSeconds !== b.momentSeconds) {
+        return a.momentSeconds - b.momentSeconds
+      }
+      // If same timestamp, sort by created_at
+      const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0
+      const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0
+      return aTime - bTime
+    })
+  
+  // Compute active comments (for highlighting in live mode)
+  const activeComments = allComments.filter(comment => comment.momentSeconds <= currentTime)
 
   // Auto-scroll to bottom when new comments appear (unless user scrolled up)
   useEffect(() => {
@@ -67,18 +82,59 @@ function LiveReactionsFeed({ moments, commentsByMomentId, currentTime, onDeleteC
     }
   }, [currentTime])
 
+  // Count total comments
+  const totalCommentCount = allComments.length
+  const activeCommentCount = activeComments.length
+
   return (
     <div className="live-reactions-feed">
+      <div className="feed-header">
+        <div className="feed-header-left">
+          {isLoading ? (
+            <span className="comments-loading">Loading comments...</span>
+          ) : (
+            <span className="comments-count">
+              {totalCommentCount === 0 
+                ? 'No comments' 
+                : showAllComments 
+                  ? `${totalCommentCount} comment${totalCommentCount !== 1 ? 's' : ''}`
+                  : `${activeCommentCount} of ${totalCommentCount} comment${totalCommentCount !== 1 ? 's' : ''}`
+              }
+            </span>
+          )}
+        </div>
+        <label className="show-all-comments-toggle">
+          <input
+            type="checkbox"
+            checked={showAllComments}
+            onChange={(e) => {
+              // This will be handled by parent component
+              if (onToggleShowAll) {
+                onToggleShowAll(e.target.checked)
+              }
+            }}
+          />
+          <span>Show all comments</span>
+        </label>
+      </div>
       <div className="feed-container" ref={feedRef} onScroll={handleScroll}>
-        {visibleComments.length === 0 ? (
+        {isLoading ? (
           <div className="feed-empty">
-            <p>Comments will appear here as the video plays...</p>
+            <p>Loading comments...</p>
+          </div>
+        ) : visibleComments.length === 0 ? (
+          <div className="feed-empty">
+            <p>{showAllComments ? 'No comments yet' : 'Comments will appear here as the video plays...'}</p>
           </div>
         ) : (
           visibleComments.map((comment) => {
             const canDelete = onDeleteComment && currentUserId && comment.authorId === currentUserId
+            const isActive = comment.momentSeconds <= currentTime
             return (
-              <div key={comment.id} className="reaction-comment-item">
+              <div 
+                key={comment.id} 
+                className={`reaction-comment-item ${!showAllComments && isActive ? 'comment-active' : ''}`}
+              >
                 <div className="reaction-comment-avatar">
                   {comment.author ? comment.author.charAt(0).toUpperCase() : '?'}
                 </div>

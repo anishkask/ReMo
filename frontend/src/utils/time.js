@@ -66,10 +66,8 @@ export function formatCommentTime(isoString) {
       return `${diffMinutes} min ago`
     } else if (diffHours < 24) {
       return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`
-    } else if (diffDays < 7) {
-      return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`
     } else {
-      // 7+ days: show absolute date (MM/DD/YY)
+      // 24+ hours: show absolute date (MM/DD/YY)
       const month = String(commentDate.getMonth() + 1).padStart(2, '0')
       const day = String(commentDate.getDate()).padStart(2, '0')
       const year = String(commentDate.getFullYear()).slice(-2)
