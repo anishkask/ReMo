@@ -18,15 +18,40 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Import database and models
-from app.db import get_db, check_db_connection, engine
+from app.db import get_db, check_db_connection, engine, get_db_info
 from app.models import Video, Comment, Base
+
+# Import DB_SCHEME after db module is loaded
+try:
+    from app.db import DB_SCHEME
+except ImportError:
+    DB_SCHEME = "unknown"
+
+# Log database configuration at startup
+logger.info(f"[STARTUP] Database URL scheme: {DB_SCHEME}")
+logger.info(f"[STARTUP] DATABASE_URL set: {'Yes' if os.getenv('DATABASE_URL') else 'No (using default SQLite)'}")
 
 # Create tables on startup (idempotent - safe to run multiple times)
 try:
     Base.metadata.create_all(bind=engine)
-    logger.info("Database tables created/verified")
+    logger.info("[STARTUP] Database tables created/verified")
+    
+    # Log which tables exist
+    from sqlalchemy import inspect
+    inspector = inspect(engine)
+    tables = inspector.get_table_names()
+    logger.info(f"[STARTUP] Existing tables: {', '.join(tables) if tables else 'none'}")
+    
+    # Log comment count if table exists
+    if "comments" in tables:
+        db = next(get_db())
+        try:
+            comment_count = db.query(Comment).count()
+            logger.info(f"[STARTUP] Total comments in database: {comment_count}")
+        finally:
+            db.close()
 except Exception as e:
-    logger.error(f"Failed to create database tables: {str(e)}")
+    logger.error(f"[STARTUP] Failed to create database tables: {str(e)}")
     # Don't crash on startup if DB is temporarily unavailable
     # This allows the app to start and return helpful errors on API calls
 
@@ -70,6 +95,31 @@ async def health():
         "status": "healthy",
         "database": "connected" if db_healthy else "disconnected"
     }
+
+
+@app.get("/debug/db")
+async def debug_db():
+    """
+    Debug endpoint to verify database configuration and comment storage.
+    Returns database scheme, host, tables, and comment count.
+    """
+    try:
+        db_info = get_db_info()
+        return {
+            "db_url_scheme": db_info.get("db_url_scheme", "unknown"),
+            "db_host": db_info.get("db_host", "unknown"),
+            "tables_present": db_info.get("tables_present", []),
+            "comment_count": db_info.get("comment_count", 0),
+            "database_url_set": bool(os.getenv("DATABASE_URL")),
+            "expected_tables": ["videos", "comments"],
+            "all_tables_present": all(table in db_info.get("tables_present", []) for table in ["videos", "comments"])
+        }
+    except Exception as e:
+        logger.error(f"[DEBUG] Error in /debug/db: {str(e)}")
+        return {
+            "error": str(e),
+            "db_url_scheme": DB_SCHEME if 'DB_SCHEME' in globals() else "unknown"
+        }
 
 
 # Pydantic models for request/response
@@ -143,10 +193,12 @@ async def get_comments(video_id: str, db: Session = Depends(get_db)):
         
         # Get comments ordered by timestamp_seconds ASC, then created_at ASC
         # This groups comments by video position, then shows oldest first within each position
+        logger.info(f"[DB] Querying comments for video_id={video_id} from database")
         comments = db.query(Comment).filter(
             Comment.video_id == video_id
         ).order_by(Comment.timestamp_seconds.asc(), Comment.created_at.asc()).all()
         
+        logger.info(f"[DB] Found {len(comments)} comments for video_id={video_id} in database")
         logger.info(f"[BACKEND] GET /videos/{video_id}/comments - Returning {len(comments)} comments")
         return comments
     except HTTPException:
@@ -169,7 +221,8 @@ async def create_comment(video_id: str, comment: CommentCreate, db: Session = De
         
         logger.info(f"[BACKEND] POST /videos/{video_id}/comments - Creating comment: author={comment.author_name}, timestamp={comment.timestamp_seconds}, body={comment.body[:50]}...")
         
-        # Create comment
+        # Create comment and INSERT into database
+        logger.info(f"[DB] Inserting comment into database for video_id={video_id}")
         db_comment = Comment(
             video_id=video_id,
             author_name=comment.author_name,
@@ -181,6 +234,7 @@ async def create_comment(video_id: str, comment: CommentCreate, db: Session = De
         db.commit()
         db.refresh(db_comment)
         
+        logger.info(f"[DB] Comment successfully inserted into database: id={db_comment.id}, video_id={video_id}, created_at={db_comment.created_at}")
         logger.info(f"[BACKEND] Comment created with ID: {db_comment.id}, created_at: {db_comment.created_at}")
         return db_comment
     except HTTPException:
