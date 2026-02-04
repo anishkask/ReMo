@@ -29,6 +29,11 @@ function getApiBaseUrl() {
 
 const API_BASE_URL = getApiBaseUrl()
 
+// Log API base URL once at module load (for debugging)
+if (typeof window !== 'undefined') {
+  console.log(`[API] Using base URL: ${API_BASE_URL || '(relative URLs)'}`)
+}
+
 /**
  * Generic API request handler
  */
@@ -44,26 +49,32 @@ async function apiRequest(endpoint, options = {}) {
   };
 
   try {
-    console.log('Making API request to:', url);
     const response = await fetch(url, config);
     
     if (!response.ok) {
-      throw new Error(`API error: ${response.status} ${response.statusText}`);
+      // Try to parse error message from response
+      let errorMessage = `API error: ${response.status} ${response.statusText}`;
+      try {
+        const errorData = await response.json();
+        if (errorData.detail) {
+          errorMessage = errorData.detail;
+        }
+      } catch {
+        // Ignore JSON parse errors
+      }
+      throw new Error(errorMessage);
     }
     
     return await response.json();
   } catch (error) {
-    console.error('API request failed:', error);
-    console.error('Request URL:', url);
-    console.error('Error details:', error.message);
-    
-    // Provide more specific error messages
-    if (error.message.includes('Failed to fetch') || error.message.includes('ERR_CONNECTION_REFUSED')) {
-      const friendlyError = new Error(`Cannot connect to backend at ${API_BASE_URL}. Make sure the backend server is running on port 8000.`);
+    // Provide user-friendly error messages
+    if (error.message.includes('Failed to fetch') || error.message.includes('ERR_CONNECTION_REFUSED') || error.message.includes('NetworkError')) {
+      const friendlyError = new Error(`Cannot connect to backend server. Please check your connection and ensure the backend is running.`);
       friendlyError.originalError = error;
       throw friendlyError;
     }
     
+    // Re-throw with original message if it's already user-friendly
     throw error;
   }
 }

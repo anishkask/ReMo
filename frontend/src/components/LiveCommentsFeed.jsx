@@ -1,23 +1,57 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { formatCommentTime, parseTimestampToSeconds } from '../utils/time'
+import { formatCommentTime, formatCommentTimeTooltip, parseTimestampToSeconds } from '../utils/time'
 
-function LiveReactionsFeed({ moments, commentsByMomentId, currentTime, onDeleteComment, currentUserId, showAllComments = true, onToggleShowAll, isLoading = false }) {
+function LiveReactionsFeed({ moments, commentsByMomentId, currentTime, onDeleteComment, currentUserId, showAllComments = false, onToggleShowAll, isLoading = false }) {
   const feedRef = useRef(null)
   const [userScrolled, setUserScrolled] = useState(false)
   const lastScrollHeightRef = useRef(0)
 
   // Flatten all comments with their moment timestamps
+  // First, create a map of momentId -> moment for quick lookup
+  const momentMap = {}
+  if (moments) {
+    moments.forEach(moment => {
+      if (moment && moment.id) {
+        momentMap[moment.id] = moment
+      }
+    })
+  }
+
   const allComments = []
-  if (moments && commentsByMomentId) {
-    moments.forEach((moment) => {
-      if (!moment || !moment.timestamp) return
-      const comments = commentsByMomentId[moment.id] || []
-      const momentSeconds = parseTimestampToSeconds(moment.timestamp)
+  if (commentsByMomentId) {
+    // Iterate directly over commentsByMomentId to ensure we get all comments
+    Object.keys(commentsByMomentId).forEach(momentId => {
+      const comments = commentsByMomentId[momentId] || []
+      const moment = momentMap[momentId]
+      
+      // If moment exists, use its timestamp; otherwise try to extract from momentId or use 0
+      let momentTimestamp = '00:00'
+      let momentSeconds = 0
+      
+      if (moment && moment.timestamp) {
+        momentTimestamp = moment.timestamp
+        momentSeconds = parseTimestampToSeconds(moment.timestamp)
+      } else {
+        // Try to extract timestamp from momentId (format: moment-videoId-MM-SS)
+        const match = momentId.match(/(\d{2})-(\d{2})(?:-(\d{2}))?$/)
+        if (match) {
+          if (match[3]) {
+            // HH:MM:SS format
+            momentTimestamp = `${match[1]}:${match[2]}:${match[3]}`
+            momentSeconds = parseInt(match[1]) * 3600 + parseInt(match[2]) * 60 + parseInt(match[3])
+          } else {
+            // MM:SS format
+            momentTimestamp = `${match[1]}:${match[2]}`
+            momentSeconds = parseInt(match[1]) * 60 + parseInt(match[2])
+          }
+        }
+      }
       
       comments.forEach((comment) => {
         allComments.push({
           ...comment,
-          momentTimestamp: moment.timestamp,
+          momentId: momentId,
+          momentTimestamp: momentTimestamp,
           momentSeconds: momentSeconds,
           authorId: comment.authorId || null,  // Preserve authorId for delete check
           createdAt: comment.createdAt || comment.createdAtISO || null  // Support both field names
@@ -28,9 +62,16 @@ function LiveReactionsFeed({ moments, commentsByMomentId, currentTime, onDeleteC
 
   // Filter comments based on showAllComments toggle
   // When showAllComments is true, show all comments regardless of currentTime
-  // When false, only show comments where timestampSeconds <= currentTime (live mode)
+  // When false, show comments within ±10 seconds of currentTime (near current playback)
+  const TIME_WINDOW_SECONDS = 10
   const visibleComments = allComments
-    .filter(comment => showAllComments || comment.momentSeconds <= currentTime)
+    .filter(comment => {
+      if (showAllComments) {
+        return true
+      }
+      // Default view: show comments within ±10 seconds of current playback time
+      return Math.abs(comment.momentSeconds - currentTime) <= TIME_WINDOW_SECONDS
+    })
     .sort((a, b) => {
       // Sort by timestamp_seconds first, then by created_at
       if (a.momentSeconds !== b.momentSeconds) {
@@ -42,8 +83,10 @@ function LiveReactionsFeed({ moments, commentsByMomentId, currentTime, onDeleteC
       return aTime - bTime
     })
   
-  // Compute active comments (for highlighting in live mode)
-  const activeComments = allComments.filter(comment => comment.momentSeconds <= currentTime)
+  // Compute active comments (for count display in default view)
+  const activeComments = allComments.filter(comment => 
+    Math.abs(comment.momentSeconds - currentTime) <= TIME_WINDOW_SECONDS
+  )
 
   // Auto-scroll to bottom when new comments appear (unless user scrolled up)
   useEffect(() => {
@@ -142,7 +185,10 @@ function LiveReactionsFeed({ moments, commentsByMomentId, currentTime, onDeleteC
                   <div className="reaction-comment-header">
                     <span className="reaction-comment-author">{comment.author || 'Anonymous'}</span>
                     {comment.createdAt && (
-                      <span className="reaction-comment-relative-time">
+                      <span 
+                        className="reaction-comment-relative-time"
+                        title={formatCommentTimeTooltip(comment.createdAt)}
+                      >
                         {formatCommentTime(comment.createdAt)}
                       </span>
                     )}
@@ -150,13 +196,14 @@ function LiveReactionsFeed({ moments, commentsByMomentId, currentTime, onDeleteC
                       <button
                         className="reaction-comment-delete-button"
                         onClick={() => {
-                          // Find moment ID for this comment
-                          const moment = moments.find(m => m.timestamp === comment.momentTimestamp)
-                          if (moment && onDeleteComment) {
-                            onDeleteComment(comment.id, moment.id)
+                          // Use momentId from comment, or find moment by timestamp
+                          const momentId = comment.momentId || (moments?.find(m => m.timestamp === comment.momentTimestamp)?.id)
+                          if (momentId && onDeleteComment) {
+                            onDeleteComment(comment.id, momentId)
                           }
                         }}
                         title="Delete comment"
+                        aria-label="Delete comment"
                       >
                         ×
                       </button>

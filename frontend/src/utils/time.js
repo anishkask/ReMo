@@ -66,8 +66,10 @@ export function formatCommentTime(isoString) {
       return `${diffMinutes} min ago`
     } else if (diffHours < 24) {
       return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`
+    } else if (diffDays < 7) {
+      return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`
     } else {
-      // 24+ hours: show absolute date (MM/DD/YY)
+      // 7+ days: show absolute date (MM/DD/YY)
       const month = String(commentDate.getMonth() + 1).padStart(2, '0')
       const day = String(commentDate.getDate()).padStart(2, '0')
       const year = String(commentDate.getFullYear()).slice(-2)
@@ -75,6 +77,38 @@ export function formatCommentTime(isoString) {
     }
   } catch (error) {
     console.error('Error formatting comment time:', error)
+    return ''
+  }
+}
+
+/**
+ * Format ISO date string to local datetime string for tooltip
+ * @param {string} isoString - ISO date string from backend
+ * @returns {string} - Formatted local datetime (e.g., "Dec 21, 2024 at 3:45 PM")
+ */
+export function formatCommentTimeTooltip(isoString) {
+  if (!isoString || typeof isoString !== 'string') {
+    return ''
+  }
+
+  try {
+    const commentDate = new Date(isoString)
+    if (isNaN(commentDate.getTime())) {
+      return ''
+    }
+    
+    // Format as: "Dec 21, 2024 at 3:45 PM"
+    const options = {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true
+    }
+    return commentDate.toLocaleString('en-US', options)
+  } catch (error) {
+    console.error('Error formatting comment time tooltip:', error)
     return ''
   }
 }

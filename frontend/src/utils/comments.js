@@ -77,22 +77,32 @@ export function groupCommentsByMoment(comments, moments) {
   })
   
   // Group comments by moment
+  // If a comment doesn't have a matching moment, create a synthetic momentId
+  const orphanMomentPrefix = 'orphan-moment-'
+  let orphanCounter = 0
+  
   comments.forEach(comment => {
-    const momentId = timestampToMomentId[comment.timestampLabel]
-    if (momentId) {
-      if (!grouped[momentId]) {
-        grouped[momentId] = []
-      }
-      
-      // Convert to app format: { id, text, author, authorId, createdAt }
-      grouped[momentId].push({
-        id: comment.id,
-        text: comment.text,
-        author: comment.displayName,
-        authorId: comment.authorId || null,  // Preserve authorId for delete functionality
-        createdAt: comment.createdAtISO || comment.createdAt || null
-      })
+    let momentId = timestampToMomentId[comment.timestampLabel]
+    
+    // If no matching moment, create a synthetic one
+    if (!momentId) {
+      // Try to create a momentId from the timestampLabel
+      const sanitizedTimestamp = comment.timestampLabel?.replace(/:/g, '-') || '00-00'
+      momentId = `${orphanMomentPrefix}${sanitizedTimestamp}-${orphanCounter++}`
     }
+    
+    if (!grouped[momentId]) {
+      grouped[momentId] = []
+    }
+    
+    // Convert to app format: { id, text, author, authorId, createdAt }
+    grouped[momentId].push({
+      id: comment.id,
+      text: comment.text,
+      author: comment.displayName,
+      authorId: comment.authorId || null,  // Preserve authorId for delete functionality
+      createdAt: comment.createdAtISO || comment.createdAt || null
+    })
   })
   
   return grouped

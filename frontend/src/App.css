@@ -2513,6 +2513,80 @@
   border-left-color: rgba(79, 195, 247, 0.6);
 }
 
+/* Delete Comment Confirmation Modal */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  backdrop-filter: blur(4px);
+}
+
+.modal-content {
+  background: rgba(20, 20, 30, 0.98);
+  border: 1px solid rgba(79, 195, 247, 0.3);
+  border-radius: 12px;
+  padding: 2rem;
+  max-width: 400px;
+  width: 90%;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.modal-content h3 {
+  margin: 0 0 1rem 0;
+  color: #FFFBF0;
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.modal-content p {
+  margin: 0 0 1.5rem 0;
+  color: rgba(255, 251, 240, 0.8);
+  line-height: 1.5;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+}
+
+.modal-button {
+  padding: 0.625rem 1.25rem;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.modal-button-cancel {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 251, 240, 0.9);
+}
+
+.modal-button-cancel:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.modal-button-delete {
+  background: #ff5252;
+  color: white;
+}
+
+.modal-button-delete:hover {
+  background: #ff1744;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(255, 82, 82, 0.3);
+}
+
 .reaction-comment-item:hover {
   background: rgba(255, 255, 255, 0.08);
   border-left-color: rgba(79, 195, 247, 0.5);

@@ -31,7 +31,8 @@ function App() {
   const [followLive, setFollowLive] = useState(true)
   const [commentsByVideoId, setCommentsByVideoId] = useState({})
   const [commentsLoading, setCommentsLoading] = useState(false)
-  const [showAllComments, setShowAllComments] = useState(true)  // Default to showing all comments
+  const [showAllComments, setShowAllComments] = useState(false)  // Default to "near current time" view
+  const [deleteConfirmComment, setDeleteConfirmComment] = useState(null)  // { commentId, momentId } or null
   const [displayName, setDisplayName] = useState('')
   const [showNamePrompt, setShowNamePrompt] = useState(false)
   const [authUser, setAuthUser] = useState(null) // Google auth user
@@ -442,7 +443,7 @@ function App() {
         console.log(`Loaded ${backendComments.length} comments from backend for video ${videoId}`)
         
         // Get moments for this video (read from current state, not dependency)
-        const videoMoments = momentsByVideoId[videoId] || []
+        let videoMoments = momentsByVideoId[videoId] || []
         
         // Convert backend comment format to frontend format
         const convertedComments = backendComments.map(comment => ({
@@ -454,17 +455,50 @@ function App() {
           timestampSeconds: comment.timestamp_seconds || 0
         }))
 
+        // Create moments for comments that don't have matching moments
+        const commentsWithTimestamps = convertedComments.map(c => ({
+          id: c.id,
+          timestampSeconds: c.timestampSeconds,
+          timestampLabel: formatSecondsToTimestamp(c.timestampSeconds),
+          text: c.text,
+          displayName: c.author,
+          createdAtISO: c.createdAt,
+          authorId: c.authorId
+        }))
+
+        // Find unique timestamps from comments that don't have moments
+        const timestampsNeedingMoments = new Set()
+        commentsWithTimestamps.forEach(comment => {
+          const existingMoment = videoMoments.find(m => m.timestamp === comment.timestampLabel)
+          if (!existingMoment) {
+            timestampsNeedingMoments.add(comment.timestampLabel)
+          }
+        })
+
+        // Create moments for timestamps that need them
+        const newMoments = []
+        timestampsNeedingMoments.forEach(timestampLabel => {
+          const newMoment = {
+            id: `moment-${videoId}-${timestampLabel.replace(/:/g, '-')}`,
+            timestamp: timestampLabel,
+            text: `Moment at ${timestampLabel}`
+          }
+          newMoments.push(newMoment)
+        })
+
+        // Update moments if we created new ones
+        if (newMoments.length > 0) {
+          videoMoments = [...videoMoments, ...newMoments]
+          // Update moments state
+          setMomentsByVideoId(prev => ({
+            ...prev,
+            [videoId]: videoMoments
+          }))
+        }
+
         // Group comments by moment
         const commentsByMoment = groupCommentsByMoment(
-          convertedComments.map(c => ({
-            id: c.id,
-            timestampSeconds: c.timestampSeconds,
-            timestampLabel: formatSecondsToTimestamp(c.timestampSeconds),
-            text: c.text,
-            displayName: c.author,
-            createdAtISO: c.createdAt,
-            authorId: c.authorId
-          })),
+          commentsWithTimestamps,
           videoMoments
         )
 
@@ -771,47 +805,79 @@ function App() {
     }
   }
 
-  const handleDeleteComment = async (commentId, momentId) => {
-    if (!selectedVideoId || !commentId) return
+  const handleDeleteCommentClick = (commentId, momentId) => {
+    // Show confirmation modal
+    setDeleteConfirmComment({ commentId, momentId })
+  }
+
+  const handleDeleteCommentConfirm = async () => {
+    if (!selectedVideoId || !deleteConfirmComment) return
     
+    const { commentId, momentId } = deleteConfirmComment
     const currentVideo = allVideos.find(v => v.id === selectedVideoId)
     const isApiVideo = currentVideo?.sourceType === 'api'
     
     if (!isApiVideo) {
-      // For non-API videos, deletion not supported (localStorage only)
+      setDeleteConfirmComment(null)
       return
     }
     
-    // Get comment to check authorization
+    // Get comment to check authorization and for optimistic update
     const comments = commentsByVideoId[selectedVideoId] || {}
     const momentComments = comments[momentId] || []
     const comment = momentComments.find(c => c.id === commentId)
     
-    if (!comment) return
+    if (!comment) {
+      setDeleteConfirmComment(null)
+      return
+    }
     
     // Check if user can delete (must be authenticated and author_id matches)
     const currentUserId = authUser?.id || null
     if (!currentUserId || comment.authorId !== currentUserId) {
       alert('You can only delete your own comments')
+      setDeleteConfirmComment(null)
       return
     }
     
-    // Confirm deletion
-    if (!window.confirm('Are you sure you want to delete this comment?')) {
-      return
-    }
+    // Optimistic UI update: remove comment immediately
+    const previousComments = { ...commentsByVideoId }
+    setCommentsByVideoId(prev => {
+      const videoComments = { ...prev[selectedVideoId] }
+      const updatedMomentComments = (videoComments[momentId] || []).filter(c => c.id !== commentId)
+      if (updatedMomentComments.length === 0) {
+        delete videoComments[momentId]
+      } else {
+        videoComments[momentId] = updatedMomentComments
+      }
+      return {
+        ...prev,
+        [selectedVideoId]: videoComments
+      }
+    })
+    
+    // Close modal
+    setDeleteConfirmComment(null)
     
     try {
-      // Delete from backend (endpoint: DELETE /videos/{video_id}/comments/{comment_id})
+      // Delete from backend
       await deleteCommentAPI(selectedVideoId, commentId, currentUserId)
       
-      // Re-fetch comments to ensure consistency
-      // Call fetchCommentsForVideo directly (no useEffect trigger)
+      // Success - comment already removed optimistically
+      // Optionally re-fetch to ensure consistency
       await fetchCommentsForVideo(selectedVideoId)
     } catch (error) {
       console.error('Failed to delete comment:', error)
+      
+      // Rollback optimistic update on error
+      setCommentsByVideoId(previousComments)
+      
       alert(`Failed to delete comment: ${error.message || 'Unknown error'}`)
     }
+  }
+
+  const handleDeleteCommentCancel = () => {
+    setDeleteConfirmComment(null)
   }
 
   const handleVideoSelect = (videoId) => {
@@ -1153,7 +1219,7 @@ function App() {
                   moments={moments}
                   commentsByMomentId={commentsByMomentId}
                   currentTime={currentTime}
-                  onDeleteComment={handleDeleteComment}
+                  onDeleteComment={handleDeleteCommentClick}
                   currentUserId={authUser?.id || null}
                   showAllComments={showAllComments}
                   onToggleShowAll={setShowAllComments}
@@ -1196,6 +1262,30 @@ function App() {
           onClose={() => setShowImportModal(false)}
           onVideoAdded={handleVideoAdded}
         />
+      )}
+
+      {/* Delete Comment Confirmation Modal */}
+      {deleteConfirmComment && (
+        <div className="modal-overlay" onClick={handleDeleteCommentCancel}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h3>Delete Comment</h3>
+            <p>Are you sure you want to delete this comment? This action cannot be undone.</p>
+            <div className="modal-actions">
+              <button 
+                className="modal-button modal-button-cancel"
+                onClick={handleDeleteCommentCancel}
+              >
+                Cancel
+              </button>
+              <button 
+                className="modal-button modal-button-delete"
+                onClick={handleDeleteCommentConfirm}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
       )}
       </div>
   )

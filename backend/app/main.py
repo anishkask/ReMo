@@ -142,7 +142,7 @@ class CommentCreate(BaseModel):
     author_name: Optional[str] = None
     author_id: Optional[str] = None
     timestamp_seconds: float = Field(ge=0, description="Timestamp in seconds (must be >= 0)")
-    body: str = Field(min_length=1, max_length=5000, description="Comment text (1-5000 characters)")
+    body: str = Field(min_length=1, max_length=500, description="Comment text (1-500 characters)")
     
     @field_validator('body')
     @classmethod
