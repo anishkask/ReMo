@@ -1,6 +1,10 @@
 # ReMo (Real-time Media Moments)
 
-A web application that enables timestamped comments on videos. Comments appear live as the video plays, creating an interactive viewing experience similar to YouTube's live chat or VOD comments.
+**Live Demo**: https://remo-nine.vercel.app/
+
+A full-stack web application that enables timestamped, persistent comments on videos.
+Comments are revealed progressively as the video plays, creating a synchronized,
+shared viewing experience similar to live VOD comment feeds.
 
 ## Project Summary
 
@@ -302,13 +306,3 @@ Comments use `deleted_at` timestamp instead of physical deletion:
 - User profiles and comment history
 - Notification system for replies
 - Export comments as transcript
-
----
-
-## License
-
-[Add your license here]
-
-## Contributing
-
-[Add contribution guidelines if applicable]
