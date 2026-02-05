@@ -95,13 +95,14 @@ export function groupCommentsByMoment(comments, moments) {
       grouped[momentId] = []
     }
     
-    // Convert to app format: { id, text, author, authorId, createdAt }
+    // Convert to app format: { id, text, author, authorId, createdAt, timestampSeconds }
     grouped[momentId].push({
       id: comment.id,
       text: comment.text,
       author: comment.displayName,
       authorId: comment.authorId || null,  // Preserve authorId for delete functionality
-      createdAt: comment.createdAtISO || comment.createdAt || null
+      createdAt: comment.createdAtISO || comment.createdAt || null,
+      timestampSeconds: comment.timestampSeconds  // Preserve timestampSeconds for live timeline
     })
   })
   

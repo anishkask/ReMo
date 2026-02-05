@@ -40,6 +40,7 @@ class Comment(Base):
     timestamp_seconds = Column(Float, nullable=False)
     body = Column(Text, nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    deleted_at = Column(DateTime, nullable=True)  # Soft delete: set timestamp when deleted
     
     # Relationship to video
     video = relationship("Video", back_populates="comments")

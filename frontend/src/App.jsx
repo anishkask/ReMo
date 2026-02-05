@@ -33,6 +33,7 @@ function App() {
   const [commentsLoading, setCommentsLoading] = useState(false)
   const [showAllComments, setShowAllComments] = useState(false)  // Default to "near current time" view
   const [deleteConfirmComment, setDeleteConfirmComment] = useState(null)  // { commentId, momentId } or null
+  const [revealedCommentIds, setRevealedCommentIds] = useState(new Set())  // Track which comments have been revealed
   const [displayName, setDisplayName] = useState('')
   const [showNamePrompt, setShowNamePrompt] = useState(false)
   const [authUser, setAuthUser] = useState(null) // Google auth user
@@ -540,6 +541,8 @@ function App() {
 
   // Ref to track in-flight comment fetch to prevent overlapping requests
   const commentsFetchRef = useRef(null)
+  // Ref to prevent duplicate comment submissions
+  const commentSubmittingRef = useRef(null)
 
   // Load comments from backend when video is selected (for API videos)
   // CRITICAL: Only depend on videoId and apiStatus - NOT on momentsByVideoId or allVideos
@@ -702,6 +705,45 @@ function App() {
 
     // Save to backend API if API video
     if (isApiVideo && apiStatus === 'connected') {
+      // Prevent duplicate submissions: disable button and track in-flight request
+      const submissionKey = `${selectedVideoId}-${timestampSeconds}-${Date.now()}`
+      if (commentSubmittingRef.current) {
+        console.warn('Comment submission already in progress, ignoring duplicate')
+        return
+      }
+      commentSubmittingRef.current = submissionKey
+      
+      // Generate temporary ID for optimistic update
+      const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+      const optimisticComment = {
+        id: tempId,
+        text: commentText.trim(),
+        author: authorName,
+        authorId: authUser?.id || null,
+        createdAt: new Date().toISOString(),
+        timestampSeconds: timestampSeconds
+      }
+      
+      // Optimistically add comment to UI immediately
+      setCommentsByVideoId(prev => {
+        const current = prev[selectedVideoId] || {}
+        const momentComments = current[targetMoment.id] || []
+        
+        // Check if comment already exists (avoid duplicates)
+        const existingIndex = momentComments.findIndex(c => c.id === tempId || (c.id === optimisticComment.id && c.text === optimisticComment.text))
+        if (existingIndex >= 0) {
+          return prev  // Already added
+        }
+        
+        return {
+          ...prev,
+          [selectedVideoId]: {
+            ...current,
+            [targetMoment.id]: [...momentComments, optimisticComment]
+          }
+        }
+      })
+      
       try {
         const savedComment = await postComment(selectedVideoId, {
           author_name: authorName,
@@ -709,55 +751,66 @@ function App() {
           timestamp_seconds: timestampSeconds,
           body: commentText.trim()
         })
-        console.log('Comment saved to backend:', savedComment)
         
-        // Optimistically add comment to UI immediately
-        const optimisticComment = {
-          id: savedComment.id,
-          text: savedComment.body,
-          author: savedComment.author_name || authorName,
-          authorId: savedComment.author_id || null,
-          createdAt: savedComment.created_at,
-          timestampSeconds: savedComment.timestamp_seconds || timestampSeconds
-        }
-        
-        // Update state optimistically
+        // Replace optimistic comment with server response
         setCommentsByVideoId(prev => {
           const current = prev[selectedVideoId] || {}
           const momentComments = current[targetMoment.id] || []
           
-          // Check if comment already exists (avoid duplicates)
-          const existingIndex = momentComments.findIndex(c => c.id === optimisticComment.id)
-          let updatedMomentComments
+          // Remove temporary comment and add real one
+          const filtered = momentComments.filter(c => c.id !== tempId)
+          const realComment = {
+            id: savedComment.id,
+            text: savedComment.body,
+            author: savedComment.author_name || authorName,
+            authorId: savedComment.author_id || null,
+            createdAt: savedComment.created_at,
+            timestampSeconds: savedComment.timestamp_seconds || timestampSeconds
+          }
+          
+          // Check if real comment already exists (avoid duplicates)
+          const existingIndex = filtered.findIndex(c => c.id === realComment.id)
           if (existingIndex >= 0) {
-            updatedMomentComments = [...momentComments]
-            updatedMomentComments[existingIndex] = optimisticComment
+            filtered[existingIndex] = realComment
           } else {
-            updatedMomentComments = [...momentComments, optimisticComment]
+            filtered.push(realComment)
           }
           
           return {
             ...prev,
             [selectedVideoId]: {
               ...current,
-              [targetMoment.id]: updatedMomentComments
+              [targetMoment.id]: filtered
+            }
+          }
+        })
+      } catch (error) {
+        console.error('Failed to save comment to API:', error)
+        
+        // Rollback optimistic update on error
+        setCommentsByVideoId(prev => {
+          const current = prev[selectedVideoId] || {}
+          const momentComments = current[targetMoment.id] || []
+          const filtered = momentComments.filter(c => c.id !== tempId)
+          
+          return {
+            ...prev,
+            [selectedVideoId]: {
+              ...current,
+              [targetMoment.id]: filtered
             }
           }
         })
         
-        // Re-fetch all comments from backend to ensure consistency
-        // Call fetchCommentsForVideo directly (no useEffect trigger)
-        try {
-          await fetchCommentsForVideo(selectedVideoId)
-        } catch (fetchError) {
-          console.error('Failed to re-fetch comments after post:', fetchError)
-          // Optimistic update already applied, so UI is correct
+        // Show user-friendly error message
+        const errorMessage = error.message || 'Unknown error'
+        if (errorMessage.includes('429') || errorMessage.includes('Rate limit')) {
+          alert(`Rate limit exceeded: ${errorMessage}. Please wait a moment before posting again.`)
+        } else {
+          alert(`Failed to save comment: ${errorMessage}. Please try again.`)
         }
-      } catch (error) {
-        console.error('Failed to save comment to API:', error)
-        // Show error message to user
-        alert(`Failed to save comment: ${error.message || 'Unknown error'}. Please try again.`)
-        // Don't save to localStorage - comments must come from backend for API videos
+      } finally {
+        commentSubmittingRef.current = null
       }
     } else {
       // For non-API videos, save to localStorage
@@ -885,6 +938,8 @@ function App() {
     setShowMenu(false)
     setSelectedMoment(null)
     setFollowLive(true)
+    // Reset revealed comments when switching videos
+    setRevealedCommentIds(new Set())
     setCurrentTime(0)
   }
 
@@ -1224,14 +1279,16 @@ function App() {
                   showAllComments={showAllComments}
                   onToggleShowAll={setShowAllComments}
                   isLoading={commentsLoading}
-                />
-              </div>
-              
-              {/* Add Comment Bar */}
-              <div className="watch-comment-bar-section">
-                <AddCommentBar
-                  currentTime={currentTime}
+                  revealedCommentIds={revealedCommentIds}
+                  onRevealComments={(newIds) => {
+                    setRevealedCommentIds(prev => {
+                      const updated = new Set(prev)
+                      newIds.forEach(id => updated.add(id))
+                      return updated
+                    })
+                  }}
                   displayName={authUser ? (authUser.name || authUser.email || 'User') : displayName}
+                  authUser={authUser}
                   onAddComment={handleAddComment}
                   onRequestName={() => {
                     if (!authUser) {

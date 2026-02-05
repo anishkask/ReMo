@@ -2455,6 +2455,14 @@
   font-size: 0.85rem;
 }
 
+.feed-container-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  min-height: 0;  /* Allow flex child to shrink */
+}
+
 .live-reactions-feed .feed-container {
   flex: 1;
   overflow-y: auto;
@@ -2462,6 +2470,7 @@
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  min-height: 0;  /* Allow scrolling */
 }
 
 .live-reactions-feed .feed-container::-webkit-scrollbar {
@@ -2508,9 +2517,105 @@
   animation: slideIn 0.3s ease-out;
 }
 
-.reaction-comment-item.comment-active {
-  background: rgba(79, 195, 247, 0.1);
-  border-left-color: rgba(79, 195, 247, 0.6);
+.reaction-comment-item.comment-revealed {
+  opacity: 1;
+}
+
+.reaction-comment-item.comment-upcoming {
+  opacity: 0.5;
+}
+
+.reaction-comment-item.comment-upcoming .comment-upcoming-label {
+  font-size: 0.75rem;
+  color: rgba(255, 251, 240, 0.5);
+  font-style: italic;
+  margin-left: 0.5rem;
+}
+
+/* Jump to latest button */
+.jump-to-latest-button {
+  position: absolute;
+  bottom: 4rem;  /* Above composer */
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(79, 195, 247, 0.9);
+  color: white;
+  border: none;
+  border-radius: 20px;
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  z-index: 10;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  transition: all 0.2s;
+}
+
+.jump-to-latest-button:hover {
+  background: rgba(79, 195, 247, 1);
+  transform: translateX(-50%) translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+/* Pinned composer at bottom */
+.feed-composer {
+  flex-shrink: 0;
+  border-top: 1px solid rgba(79, 195, 247, 0.2);
+  padding: 0.75rem 1rem;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.feed-composer .add-comment-bar {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+}
+
+.feed-composer .add-comment-form {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.feed-composer .add-comment-input {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(79, 195, 247, 0.3);
+  border-radius: 6px;
+  padding: 0.625rem 0.75rem;
+  color: #FFFBF0;
+  font-size: 0.9rem;
+}
+
+.feed-composer .add-comment-input:focus {
+  outline: none;
+  border-color: rgba(79, 195, 247, 0.6);
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.feed-composer .add-comment-submit {
+  padding: 0.625rem 1.25rem;
+  background: #4FC3F7;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.feed-composer .add-comment-submit:hover:not(:disabled) {
+  background: #0288D1;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(79, 195, 247, 0.3);
+}
+
+.feed-composer .add-comment-submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Delete Comment Confirmation Modal */

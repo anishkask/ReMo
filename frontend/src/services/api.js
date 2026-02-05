@@ -60,9 +60,14 @@ async function apiRequest(endpoint, options = {}) {
           errorMessage = errorData.detail;
         }
       } catch {
-        // Ignore JSON parse errors
+        // If response is not JSON, use status text
+        if (response.status === 429) {
+          errorMessage = 'Rate limit exceeded. Please wait a moment before posting again.';
+        }
       }
-      throw new Error(errorMessage);
+      const error = new Error(errorMessage);
+      error.status = response.status;  // Attach status for handling
+      throw error;
     }
     
     return await response.json();

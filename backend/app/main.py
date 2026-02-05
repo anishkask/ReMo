@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, field_validator
 from google.auth.transport import requests
 from google.oauth2 import id_token
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 import os
 import uuid
@@ -37,17 +37,42 @@ try:
     logger.info("[STARTUP] Database tables created/verified")
     
     # Log which tables exist
-    from sqlalchemy import inspect
+    from sqlalchemy import inspect, text
     inspector = inspect(engine)
     tables = inspector.get_table_names()
     logger.info(f"[STARTUP] Existing tables: {', '.join(tables) if tables else 'none'}")
     
-    # Log comment count if table exists
+    # Check if comments table exists and add deleted_at column if missing (migration helper)
     if "comments" in tables:
         db = next(get_db())
         try:
+            # Check if deleted_at column exists
+            if DB_SCHEME == "sqlite":
+                result = db.execute(text("PRAGMA table_info(comments)"))
+                columns = [row[1] for row in result.fetchall()]
+            else:
+                # PostgreSQL
+                result = db.execute(text("""
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name='comments' AND column_name='deleted_at'
+                """))
+                columns = [row[0] for row in result.fetchall()]
+            
+            if 'deleted_at' not in columns:
+                logger.info("[STARTUP] Adding deleted_at column to comments table (migration)")
+                if DB_SCHEME == "sqlite":
+                    db.execute(text("ALTER TABLE comments ADD COLUMN deleted_at DATETIME"))
+                else:
+                    db.execute(text("ALTER TABLE comments ADD COLUMN deleted_at TIMESTAMP"))
+                db.commit()
+                logger.info("[STARTUP] Successfully added deleted_at column")
+            
             comment_count = db.query(Comment).count()
             logger.info(f"[STARTUP] Total comments in database: {comment_count}")
+        except Exception as migration_error:
+            logger.warning(f"[STARTUP] Migration check failed (may already be applied): {str(migration_error)}")
+            db.rollback()
         finally:
             db.close()
 except Exception as e:
@@ -180,10 +205,17 @@ async def get_video(video_id: str, db: Session = Depends(get_db)):
     return video
 
 @app.get("/videos/{video_id}/comments", response_model=List[CommentResponse])
-async def get_comments(video_id: str, db: Session = Depends(get_db)):
+async def get_comments(
+    video_id: str,
+    limit: int = 100,
+    offset: int = 0,
+    db: Session = Depends(get_db)
+):
     """
-    Get all comments for a video, ordered by created_at ascending.
-    Returns empty list if video has no comments.
+    Get comments for a video with pagination.
+    - Filters out soft-deleted comments (deleted_at IS NULL)
+    - Ordered by timestamp_seconds ASC, then created_at ASC
+    - Supports limit and offset for pagination
     """
     try:
         # Verify video exists
@@ -191,15 +223,24 @@ async def get_comments(video_id: str, db: Session = Depends(get_db)):
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
         
-        # Get comments ordered by timestamp_seconds ASC, then created_at ASC
-        # This groups comments by video position, then shows oldest first within each position
-        logger.info(f"[DB] Querying comments for video_id={video_id} from database")
-        comments = db.query(Comment).filter(
-            Comment.video_id == video_id
-        ).order_by(Comment.timestamp_seconds.asc(), Comment.created_at.asc()).all()
+        # Validate pagination parameters
+        if limit < 1 or limit > 500:
+            limit = 100
+        if offset < 0:
+            offset = 0
         
-        logger.info(f"[DB] Found {len(comments)} comments for video_id={video_id} in database")
-        logger.info(f"[BACKEND] GET /videos/{video_id}/comments - Returning {len(comments)} comments")
+        # Get comments ordered by timestamp_seconds ASC, then created_at ASC
+        # Filter out soft-deleted comments (deleted_at IS NULL)
+        logger.info(f"[DB] Querying comments for video_id={video_id} (limit={limit}, offset={offset})")
+        comments = db.query(Comment).filter(
+            Comment.video_id == video_id,
+            Comment.deleted_at.is_(None)  # Only return non-deleted comments
+        ).order_by(
+            Comment.timestamp_seconds.asc(),
+            Comment.created_at.asc()
+        ).offset(offset).limit(limit).all()
+        
+        logger.info(f"[DB] Found {len(comments)} comments for video_id={video_id}")
         return comments
     except HTTPException:
         raise
@@ -211,9 +252,22 @@ async def get_comments(video_id: str, db: Session = Depends(get_db)):
 async def create_comment(video_id: str, comment: CommentCreate, db: Session = Depends(get_db)):
     """
     Create a new comment for a video.
-    Validates input and persists to database.
+    Validates input, checks rate limits, and persists to database.
     """
     try:
+        # Rate limiting: check if user has exceeded limit
+        from app.rate_limit import check_rate_limit, get_rate_limit_error_message
+        user_id = comment.author_id or "guest"
+        is_allowed, seconds_until_reset = check_rate_limit(user_id)
+        
+        if not is_allowed:
+            error_msg = get_rate_limit_error_message(seconds_until_reset)
+            logger.warning(f"[RATE_LIMIT] User {user_id} exceeded rate limit")
+            raise HTTPException(
+                status_code=429,
+                detail=error_msg
+            )
+        
         # Verify video exists
         video = db.query(Video).filter(Video.id == video_id).first()
         if not video:
@@ -228,7 +282,8 @@ async def create_comment(video_id: str, comment: CommentCreate, db: Session = De
             author_name=comment.author_name,
             author_id=comment.author_id,
             timestamp_seconds=comment.timestamp_seconds,
-            body=comment.body
+            body=comment.body,
+            deleted_at=None  # Explicitly set to None for new comments
         )
         db.add(db_comment)
         db.commit()
@@ -293,11 +348,12 @@ async def delete_comment(
                 detail="You can only delete your own comments"
             )
         
-        # Authorized - delete the comment
-        db.delete(comment)
+        # Authorized - soft delete the comment (set deleted_at timestamp)
+        comment.deleted_at = datetime.now(timezone.utc)
         db.commit()
+        db.refresh(comment)
         
-        logger.info(f"[BACKEND] Comment {comment_id} deleted by user {user_id_param}")
+        logger.info(f"[BACKEND] Comment {comment_id} soft-deleted by user {user_id_param}")
         # Return 204 No Content
         from fastapi.responses import Response
         return Response(status_code=204)

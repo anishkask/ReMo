@@ -60,16 +60,15 @@ export function formatCommentTime(isoString) {
     const diffDays = Math.floor(diffHours / 24)
 
     // Show relative time for recent comments
+    // Production-quality: "now", "5 min ago", "3 hours ago", then absolute date if > 24 hours
     if (diffSeconds < 60) {
       return 'now'
     } else if (diffMinutes < 60) {
       return `${diffMinutes} min ago`
     } else if (diffHours < 24) {
       return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`
-    } else if (diffDays < 7) {
-      return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`
     } else {
-      // 7+ days: show absolute date (MM/DD/YY)
+      // 24+ hours: show absolute date (MM/DD/YY)
       const month = String(commentDate.getMonth() + 1).padStart(2, '0')
       const day = String(commentDate.getDate()).padStart(2, '0')
       const year = String(commentDate.getFullYear()).slice(-2)
@@ -111,4 +110,22 @@ export function formatCommentTimeTooltip(isoString) {
     console.error('Error formatting comment time tooltip:', error)
     return ''
   }
+}
+
+/**
+ * Format video timestamp (seconds) to MM:SS or HH:MM:SS
+ * @param {number} seconds - Time in seconds
+ * @returns {string} - Formatted timestamp (e.g., "03:40" or "01:23:45")
+ */
+export function formatVideoTimestamp(seconds) {
+  return formatSecondsToTimestamp(seconds)
+}
+
+/**
+ * Format time ago from ISO date string
+ * @param {string} isoString - ISO date string from backend
+ * @returns {string} - Formatted time ago (e.g., "now", "10 min ago", "5 hours ago", "12/21/26")
+ */
+export function formatTimeAgo(isoString) {
+  return formatCommentTime(isoString)
 }
